@@ -41,7 +41,7 @@ System_Boundary(hepaq, "HEPAQ") {
 
         System_Ext(seguro, "Sistema de Aseguramiento EsSalud", "Validación de cobertura")
         
-        System_Ext(medicos, "Directorio Médico", "Información de médicos y disponibilidad")
+        System_Ext(medicos, "Directorio Médico", "Información de médicos")
     }
 
     Boundary(cqrsConsultas, "CQRS - Consultas") {

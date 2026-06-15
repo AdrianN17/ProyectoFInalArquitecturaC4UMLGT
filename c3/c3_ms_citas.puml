@@ -52,6 +52,8 @@ Container_Boundary(msCitas, "MS Citas - Spring Boot WebFlux") {
 
     Component(citaRedisAdapter, "CitaRedisAdapter", "Outbound Adapter", "Administración de cache")
 
+    Component(medicosRedisAdapter, "MedicosRedisAdapter", "Outbound Adapter", "Cache de Directorio Médico")
+
     ' ==========================
     ' Repositories
     ' ==========================
@@ -61,6 +63,8 @@ Container_Boundary(msCitas, "MS Citas - Spring Boot WebFlux") {
     Component(citaCosmosRepository, "CitaCosmosRepository", "Spring Data Cosmos", "Acceso a Cosmos DB")
 
     Component(citaRedisRepository, "CitaRedisRepository", "Spring Data Redis", "Acceso a Redis")
+
+    Component(medicosRedisRepository, "MedicosRedisRepository", "Spring Data Redis", "Cache Directorio Médico")
 
     ' ==========================
     ' External Integrations
@@ -81,7 +85,7 @@ System_Ext(reniec, "RENIEC", "Validación de identidad")
 
 System_Ext(seguro, "Sistema de Aseguramiento EsSalud", "Validación de cobertura")
 
-System_Ext(medicos, "Directorio Médico", "Información de médicos y disponibilidad")
+System_Ext(medicos, "Directorio Médico", "Información de médicos")
 
 ContainerDb_Ext(sql, "Azure SQL Database", "Write Model")
 
@@ -135,19 +139,25 @@ Rel(agendarCitaService, reniecWebClient, "Valida identidad")
 
 Rel(agendarCitaService, seguroWebClient, "Valida cobertura")
 
-Rel(agendarCitaService, medicosWebClient, "Valida médico y disponibilidad")
+Rel(agendarCitaService, medicosRedisAdapter, "Consulta cache médico")
 
 Rel(reagendarCitaService, reniecWebClient, "Valida identidad")
 
 Rel(reagendarCitaService, seguroWebClient, "Valida cobertura")
 
-Rel(reagendarCitaService, medicosWebClient, "Valida disponibilidad")
+Rel(reagendarCitaService, medicosRedisAdapter, "Consulta cache medicos")
+
+Rel(medicosRedisAdapter, medicosRedisRepository, "Usa")
+
+Rel(medicosRedisRepository, redis, "CRUD")
+
+Rel(medicosRedisAdapter, medicosWebClient, "Cache Miss")
+
+Rel(medicosWebClient, medicos, "HTTPS")
 
 Rel(reniecWebClient, reniec, "HTTPS")
 
 Rel(seguroWebClient, seguro, "HTTPS")
-
-Rel(medicosWebClient, medicos, "HTTPS")
 
 ' ==========================
 ' Azure SQL (Write Model)
