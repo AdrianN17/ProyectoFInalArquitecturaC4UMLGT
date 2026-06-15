@@ -40,6 +40,8 @@ System_Boundary(hepaq, "HEPAQ") {
         System_Ext(reniec, "RENIEC", "Validación de identidad")
 
         System_Ext(seguro, "Sistema de Aseguramiento EsSalud", "Validación de cobertura")
+        
+        System_Ext(medicos, "Directorio Médico", "Información de médicos y disponibilidad")
     }
 
     Boundary(cqrsConsultas, "CQRS - Consultas") {

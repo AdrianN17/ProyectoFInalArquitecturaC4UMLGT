@@ -70,6 +70,8 @@ Container_Boundary(msCitas, "MS Citas - Spring Boot WebFlux") {
 
     Component(seguroWebClient, "SeguroWebClient", "Spring WebClient", "Integración con Sistema de Aseguramiento EsSalud")
 
+    Component(medicosWebClient, "MedicosWebClient", "Spring WebClient", "Integración con Directorio Médico")
+
     Component(serviceBusPublisher, "ServiceBusPublisher", "Azure Service Bus Adapter", "Publicación de eventos")
 }
 
@@ -78,6 +80,8 @@ Component_Ext(apim, "Azure API Management", "Gateway de entrada")
 System_Ext(reniec, "RENIEC", "Validación de identidad")
 
 System_Ext(seguro, "Sistema de Aseguramiento EsSalud", "Validación de cobertura")
+
+System_Ext(medicos, "Directorio Médico", "Información de médicos y disponibilidad")
 
 ContainerDb_Ext(sql, "Azure SQL Database", "Write Model")
 
@@ -124,20 +128,26 @@ Rel(serviceBus, agendarCitaConsumer, "AgendarCitaCommand")
 Rel(agendarCitaConsumer, agendarCitaService, "Ejecuta comando")
 
 ' ==========================
-' RENIEC / EsSalud
+' RENIEC / EsSalud / Médicos
 ' ==========================
 
 Rel(agendarCitaService, reniecWebClient, "Valida identidad")
 
 Rel(agendarCitaService, seguroWebClient, "Valida cobertura")
 
+Rel(agendarCitaService, medicosWebClient, "Valida médico y disponibilidad")
+
 Rel(reagendarCitaService, reniecWebClient, "Valida identidad")
 
 Rel(reagendarCitaService, seguroWebClient, "Valida cobertura")
 
+Rel(reagendarCitaService, medicosWebClient, "Valida disponibilidad")
+
 Rel(reniecWebClient, reniec, "HTTPS")
 
 Rel(seguroWebClient, seguro, "HTTPS")
+
+Rel(medicosWebClient, medicos, "HTTPS")
 
 ' ==========================
 ' Azure SQL (Write Model)
