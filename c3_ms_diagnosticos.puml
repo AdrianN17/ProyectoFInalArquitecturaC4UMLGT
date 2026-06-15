@@ -1,0 +1,184 @@
+@startuml
+
+!include <C4/C4_Component>
+
+title HEPAQ - MS Diagnósticos\nC4 Nivel 3 (Component Diagram)
+
+Container_Boundary(msDiagnosticos, "MS Diagnósticos - Spring Boot WebFlux") {
+
+    ' ==========================
+    ' API Layer
+    ' ==========================
+
+    Component(diagnosticosController, "DiagnosticosController", "REST Controller", "Endpoints REST generados con OpenAPI")
+
+    Component(diagnosticoDelegate, "DiagnosticoDelegate", "Delegate", "Desacopla la lógica del controlador")
+
+    Component(diagnosticoMapper, "DiagnosticoMapper", "MapStruct", "Transformación DTO ↔ Dominio ↔ Entity")
+
+    ' ==========================
+    ' Command Side
+    ' ==========================
+
+    Component(registrarDiagnosticoService, "RegistrarDiagnosticoService", "Command Service", "Registrar diagnóstico")
+
+    Component(borrarDiagnosticoService, "BorrarDiagnosticoService", "Command Service", "Eliminar diagnóstico")
+
+    Component(diagnosticoEventPublisher, "DiagnosticoEventPublisher", "Domain Event Publisher", "Publicación de eventos de dominio")
+
+    ' ==========================
+    ' Query Side
+    ' ==========================
+
+    Component(obtenerDiagnosticoQuery, "ObtenerDiagnosticoQuery", "Query Service", "Consulta detalle de diagnóstico")
+
+    Component(listarDiagnosticosQuery, "ListarDiagnosticosQuery", "Query Service", "Consulta listado de diagnósticos")
+
+    Component(listarCieQuery, "ListarCieQuery", "Query Service", "Consulta catálogo CIE-10")
+
+    ' ==========================
+    ' Event Consumer
+    ' ==========================
+
+    Component(borrarDiagnosticosConsumer, "BorrarDiagnosticosConsumer", "Azure Service Bus Consumer", "Consume eventos para eliminación masiva de diagnósticos")
+
+    ' ==========================
+    ' Adapters
+    ' ==========================
+
+    Component(diagnosticoJpaAdapter, "DiagnosticoJpaAdapter", "Outbound Adapter", "Persistencia Azure SQL")
+
+    Component(diagnosticoCosmosAdapter, "DiagnosticoCosmosAdapter", "Outbound Adapter", "Persistencia Cosmos DB")
+
+    Component(diagnosticoRedisAdapter, "DiagnosticoRedisAdapter", "Outbound Adapter", "Administración de cache")
+
+    Component(cieTableAdapter, "CieTableAdapter", "Outbound Adapter", "Consulta catálogo CIE")
+
+    ' ==========================
+    ' Repositories
+    ' ==========================
+
+    Component(diagnosticoJpaRepository, "DiagnosticoJpaRepository", "Spring Data JPA", "Acceso a Azure SQL")
+
+    Component(diagnosticoCosmosRepository, "DiagnosticoCosmosRepository", "Spring Data Cosmos", "Acceso a Cosmos DB")
+
+    Component(diagnosticoRedisRepository, "DiagnosticoRedisRepository", "Spring Data Redis", "Acceso a Redis")
+
+    Component(cieTableRepository, "CieTableRepository", "Azure Data Tables SDK", "Acceso catálogo CIE")
+}
+
+Component_Ext(apim, "Azure API Management", "Gateway de entrada")
+
+ContainerDb_Ext(sql, "Azure SQL Database", "Write Model")
+
+ContainerDb_Ext(cosmos, "Azure Cosmos DB", "Read Model")
+
+ContainerDb_Ext(redis, "Azure Cache for Redis", "Cache Distribuido")
+
+ContainerDb_Ext(cieTable, "Azure Table Storage", "Catálogo CIE-10")
+
+ContainerQueue_Ext(serviceBus, "Azure Service Bus", "Eventos de Dominio")
+
+' ==========================
+' API Flow
+' ==========================
+
+Rel(apim, diagnosticosController, "HTTPS")
+
+Rel(diagnosticosController, diagnosticoDelegate, "Delega")
+
+Rel(diagnosticoDelegate, diagnosticoMapper, "Mapea DTO")
+
+' ==========================
+' Commands
+' ==========================
+
+Rel(diagnosticoDelegate, registrarDiagnosticoService, "Commands")
+
+Rel(diagnosticoDelegate, borrarDiagnosticoService, "Commands")
+
+' ==========================
+' Queries
+' ==========================
+
+Rel(diagnosticoDelegate, obtenerDiagnosticoQuery, "Queries")
+
+Rel(diagnosticoDelegate, listarDiagnosticosQuery, "Queries")
+
+Rel(diagnosticoDelegate, listarCieQuery, "Queries")
+
+' ==========================
+' Event Consuming
+' ==========================
+
+Rel(serviceBus, borrarDiagnosticosConsumer, "BorrarDiagnosticosCommand")
+
+Rel(borrarDiagnosticosConsumer, borrarDiagnosticoService, "Ejecuta comando")
+
+' ==========================
+' Azure SQL (Write Model)
+' ==========================
+
+Rel(registrarDiagnosticoService, diagnosticoJpaAdapter, "Inserta")
+
+Rel(borrarDiagnosticoService, diagnosticoJpaAdapter, "Elimina")
+
+Rel(diagnosticoJpaAdapter, diagnosticoJpaRepository, "Usa")
+
+Rel(diagnosticoJpaRepository, sql, "CRUD")
+
+' ==========================
+' Cosmos DB (Read Model)
+' ==========================
+
+Rel(registrarDiagnosticoService, diagnosticoCosmosAdapter, "Actualiza Read Model")
+
+Rel(borrarDiagnosticoService, diagnosticoCosmosAdapter, "Actualiza Read Model")
+
+Rel(diagnosticoCosmosAdapter, diagnosticoCosmosRepository, "Usa")
+
+Rel(diagnosticoCosmosRepository, cosmos, "CRUD")
+
+' ==========================
+' Redis Cache
+' ==========================
+
+Rel(registrarDiagnosticoService, diagnosticoRedisAdapter, "Invalida Cache")
+
+Rel(borrarDiagnosticoService, diagnosticoRedisAdapter, "Invalida Cache")
+
+Rel(diagnosticoRedisAdapter, diagnosticoRedisRepository, "Usa")
+
+Rel(diagnosticoRedisRepository, redis, "CRUD")
+
+Rel(obtenerDiagnosticoQuery, diagnosticoRedisAdapter, "Consulta Cache")
+
+Rel(listarDiagnosticosQuery, diagnosticoRedisAdapter, "Consulta Cache")
+
+Rel(obtenerDiagnosticoQuery, diagnosticoCosmosAdapter, "Fallback")
+
+Rel(listarDiagnosticosQuery, diagnosticoCosmosAdapter, "Fallback")
+
+' ==========================
+' Catálogo CIE (Solo Lectura)
+' ==========================
+
+Rel(listarCieQuery, cieTableAdapter, "Consulta catálogo")
+
+Rel(cieTableAdapter, cieTableRepository, "Usa")
+
+Rel(cieTableRepository, cieTable, "Query")
+
+' ==========================
+' Event Publishing
+' ==========================
+
+Rel(registrarDiagnosticoService, diagnosticoEventPublisher, "DiagnosticoRegistradoEvent")
+
+Rel(borrarDiagnosticoService, diagnosticoEventPublisher, "DiagnosticoEliminadoEvent")
+
+Rel(diagnosticoEventPublisher, serviceBus, "Publica eventos")
+
+SHOW_LEGEND()
+
+@enduml

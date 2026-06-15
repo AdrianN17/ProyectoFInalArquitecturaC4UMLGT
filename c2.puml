@@ -58,6 +58,7 @@ System_Boundary(hepaq, "HEPAQ") {
         ContainerDb(diagnosticosWriteDb, "Azure SQL - Diagnósticos", "Azure SQL Database", "Modelo de escritura (Commands)")
 
         ContainerDb(diagnosticosReadDb, "Cosmos DB - Diagnósticos", "Azure Cosmos DB", "Modelo de lectura (Queries)")
+        ContainerDb(cieReadDb, "Azure tables - CIE", "Azure Tables", "Modelo de lectura (Queries)")
     }
 
     Boundary(cqrsExamenes, "CQRS - Exámenes") {
@@ -68,6 +69,8 @@ System_Boundary(hepaq, "HEPAQ") {
 
         ContainerDb(examenesReadDb, "Cosmos DB - Exámenes", "Azure Cosmos DB", "Modelo de lectura (Queries)")
     }
+
+    Container(notificaciones, "MS Notificaciones", "Java Spring Boot WebFlux", "Envío de correos, SMS, push notifications y alertas del sistema")
 }
 
 ' ==========================
@@ -141,6 +144,8 @@ Rel(consultas, eventBus, "Publica y consume eventos")
 Rel(diagnosticos, eventBus, "Publica y consume eventos")
 
 Rel(examenes, eventBus, "Publica y consume eventos")
+
+Rel(notificaciones, eventBus, "Publica y consume eventos")
 
 ' ==========================
 ' Seguridad

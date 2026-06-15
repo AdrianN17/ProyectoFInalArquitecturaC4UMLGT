@@ -1,0 +1,216 @@
+@startuml
+
+!include <C4/C4_Component>
+
+title HEPAQ - MS Exámenes\nC4 Nivel 3 (Component Diagram)
+
+Container_Boundary(msExamenes, "MS Exámenes - Spring Boot WebFlux") {
+
+    ' ==========================
+    ' API Layer
+    ' ==========================
+
+    Component(examenesController, "ExamenesController", "REST Controller", "Endpoints REST generados con OpenAPI")
+
+    Component(examenDelegate, "ExamenDelegate", "Delegate", "Desacopla la lógica del controlador")
+
+    Component(examenMapper, "ExamenMapper", "MapStruct", "Transformación DTO ↔ Dominio ↔ Entity")
+
+    ' ==========================
+    ' Command Side
+    ' ==========================
+
+    Component(registrarExamenService, "RegistrarExamenService", "Command Service", "Registrar examen")
+
+    Component(cancelarExamenService, "CancelarExamenService", "Command Service", "Cancelar examen")
+
+    Component(editarExamenService, "EditarExamenService", "Command Service", "Editar examen")
+
+    Component(borrarExamenService, "BorrarExamenService", "Command Service", "Eliminar examen")
+
+    Component(examenEventPublisher, "ExamenEventPublisher", "Domain Event Publisher", "Publicación de eventos de dominio")
+
+    ' ==========================
+    ' Query Side
+    ' ==========================
+
+    Component(obtenerExamenQuery, "ObtenerExamenQuery", "Query Service", "Consulta detalle de examen")
+
+    Component(listarExamenesQuery, "ListarExamenesQuery", "Query Service", "Consulta listado de exámenes")
+
+    Component(obtenerAdjuntoQuery, "ObtenerAdjuntoQuery", "Query Service", "Obtiene adjuntos del examen")
+
+    ' ==========================
+    ' Event Consumers
+    ' ==========================
+
+    Component(registrarExamenConsumer, "RegistrarExamenConsumer", "Azure Service Bus Consumer", "Consume eventos para registrar exámenes")
+
+    Component(cancelarExamenConsumer, "CancelarExamenConsumer", "Azure Service Bus Consumer", "Consume eventos para cancelar exámenes")
+
+    Component(borrarExamenConsumer, "BorrarExamenConsumer", "Azure Service Bus Consumer", "Consume eventos para eliminar exámenes")
+
+    ' ==========================
+    ' Adapters
+    ' ==========================
+
+    Component(examenJpaAdapter, "ExamenJpaAdapter", "Outbound Adapter", "Persistencia Azure SQL")
+
+    Component(examenCosmosAdapter, "ExamenCosmosAdapter", "Outbound Adapter", "Persistencia Cosmos DB")
+
+    Component(examenRedisAdapter, "ExamenRedisAdapter", "Outbound Adapter", "Administración de cache")
+
+    Component(blobStorageAdapter, "BlobStorageAdapter", "Outbound Adapter", "Gestión de adjuntos médicos")
+
+    ' ==========================
+    ' Repositories
+    ' ==========================
+
+    Component(examenJpaRepository, "ExamenJpaRepository", "Spring Data JPA", "Acceso a Azure SQL")
+
+    Component(examenCosmosRepository, "ExamenCosmosRepository", "Spring Data Cosmos", "Acceso a Cosmos DB")
+
+    Component(examenRedisRepository, "ExamenRedisRepository", "Spring Data Redis", "Acceso a Redis")
+}
+
+Component_Ext(apim, "Azure API Management", "Gateway de entrada")
+
+ContainerDb_Ext(sql, "Azure SQL Database", "Write Model")
+
+ContainerDb_Ext(cosmos, "Azure Cosmos DB", "Read Model")
+
+ContainerDb_Ext(redis, "Azure Cache for Redis", "Cache Distribuido")
+
+Container_Ext(storage, "Azure Blob Storage", "Adjuntos e imágenes médicas")
+
+ContainerQueue_Ext(serviceBus, "Azure Service Bus", "Eventos de Dominio")
+
+' ==========================
+' API Flow
+' ==========================
+
+Rel(apim, examenesController, "HTTPS")
+
+Rel(examenesController, examenDelegate, "Delega")
+
+Rel(examenDelegate, examenMapper, "Mapea DTO")
+
+' ==========================
+' Commands
+' ==========================
+
+Rel(examenDelegate, editarExamenService, "Commands")
+
+' ==========================
+' Queries
+' ==========================
+
+Rel(examenDelegate, obtenerExamenQuery, "Queries")
+
+Rel(examenDelegate, listarExamenesQuery, "Queries")
+
+Rel(examenDelegate, obtenerAdjuntoQuery, "Queries")
+
+' ==========================
+' Event Consuming
+' ==========================
+
+Rel(serviceBus, registrarExamenConsumer, "RegistrarExamenCommand")
+
+Rel(registrarExamenConsumer, registrarExamenService, "Ejecuta comando")
+
+Rel(serviceBus, cancelarExamenConsumer, "CancelarExamenCommand")
+
+Rel(cancelarExamenConsumer, cancelarExamenService, "Ejecuta comando")
+
+Rel(serviceBus, borrarExamenConsumer, "BorrarExamenCommand")
+
+Rel(borrarExamenConsumer, borrarExamenService, "Ejecuta comando")
+
+' ==========================
+' Azure SQL (Write Model)
+' ==========================
+
+Rel(registrarExamenService, examenJpaAdapter, "Inserta")
+
+Rel(cancelarExamenService, examenJpaAdapter, "Actualiza")
+
+Rel(editarExamenService, examenJpaAdapter, "Actualiza")
+
+Rel(borrarExamenService, examenJpaAdapter, "Elimina")
+
+Rel(examenJpaAdapter, examenJpaRepository, "Usa")
+
+Rel(examenJpaRepository, sql, "CRUD")
+
+' ==========================
+' Cosmos DB (Read Model)
+' ==========================
+
+Rel(registrarExamenService, examenCosmosAdapter, "Actualiza Read Model")
+
+Rel(cancelarExamenService, examenCosmosAdapter, "Actualiza Read Model")
+
+Rel(editarExamenService, examenCosmosAdapter, "Actualiza Read Model")
+
+Rel(borrarExamenService, examenCosmosAdapter, "Actualiza Read Model")
+
+Rel(examenCosmosAdapter, examenCosmosRepository, "Usa")
+
+Rel(examenCosmosRepository, cosmos, "CRUD")
+
+' ==========================
+' Redis Cache
+' ==========================
+
+Rel(registrarExamenService, examenRedisAdapter, "Invalida Cache")
+
+Rel(cancelarExamenService, examenRedisAdapter, "Invalida Cache")
+
+Rel(editarExamenService, examenRedisAdapter, "Invalida Cache")
+
+Rel(borrarExamenService, examenRedisAdapter, "Invalida Cache")
+
+Rel(examenRedisAdapter, examenRedisRepository, "Usa")
+
+Rel(examenRedisRepository, redis, "CRUD")
+
+Rel(obtenerExamenQuery, examenRedisAdapter, "Consulta Cache")
+
+Rel(listarExamenesQuery, examenRedisAdapter, "Consulta Cache")
+
+Rel(obtenerExamenQuery, examenCosmosAdapter, "Fallback")
+
+Rel(listarExamenesQuery, examenCosmosAdapter, "Fallback")
+
+' ==========================
+' Blob Storage
+' ==========================
+
+Rel(registrarExamenService, blobStorageAdapter, "Almacena adjuntos")
+
+Rel(editarExamenService, blobStorageAdapter, "Actualiza adjuntos")
+
+Rel(obtenerAdjuntoQuery, blobStorageAdapter, "Obtiene adjuntos")
+
+Rel(borrarExamenService, blobStorageAdapter, "Elimina adjuntos")
+
+Rel(blobStorageAdapter, storage, "CRUD")
+
+' ==========================
+' Event Publishing
+' ==========================
+
+Rel(registrarExamenService, examenEventPublisher, "ExamenRegistradoEvent")
+
+Rel(cancelarExamenService, examenEventPublisher, "ExamenCanceladoEvent")
+
+Rel(editarExamenService, examenEventPublisher, "ExamenEditadoEvent")
+
+Rel(borrarExamenService, examenEventPublisher, "ExamenEliminadoEvent")
+
+Rel(examenEventPublisher, serviceBus, "Publica eventos")
+
+SHOW_LEGEND()
+
+@enduml

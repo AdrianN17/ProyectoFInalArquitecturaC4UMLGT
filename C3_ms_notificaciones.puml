@@ -1,0 +1,78 @@
+@startuml
+
+!include <C4/C4_Component>
+
+title HEPAQ - MS Notificaciones\nC4 Nivel 3 (Component Diagram)
+
+Container_Boundary(msNotificaciones, "MS Notificaciones - Spring Boot WebFlux") {
+
+    ' ==========================
+    ' Event Consumer
+    ' ==========================
+
+    Component(generarNotificacionConsumer, "GenerarNotificacionConsumer", "Azure Service Bus Consumer", "Consume eventos para generar notificaciones")
+
+    ' ==========================
+    ' Command Side
+    ' ==========================
+
+    Component(generarNotificacionService, "GenerarNotificacionService", "Command Service", "Genera y envía notificaciones")
+
+    ' ==========================
+    ' Email
+    ' ==========================
+
+    Component(emailTemplateService, "EmailTemplateService", "Template Service", "Construcción de plantillas de correo")
+
+    Component(javaMailAdapter, "JavaMailAdapter", "Spring Mail / Jakarta Mail", "Envío de correos electrónicos")
+
+    ' ==========================
+    ' Adapters
+    ' ==========================
+
+    Component(notificacionJpaAdapter, "NotificacionJpaAdapter", "Outbound Adapter", "Persistencia de auditoría")
+
+    ' ==========================
+    ' Repositories
+    ' ==========================
+
+    Component(notificacionJpaRepository, "NotificacionJpaRepository", "Spring Data JPA", "Acceso a auditoría de notificaciones")
+}
+
+ContainerDb_Ext(sql, "Azure SQL Database", "Auditoría de Notificaciones")
+
+ContainerQueue_Ext(serviceBus, "Azure Service Bus", "Eventos de Dominio")
+
+System_Ext(smtpServer, "SMTP Server", "Microsoft 365 / Exchange Online")
+
+' ==========================
+' Event Consuming
+' ==========================
+
+Rel(serviceBus, generarNotificacionConsumer, "GenerarNotificacionCommand")
+
+Rel(generarNotificacionConsumer, generarNotificacionService, "Ejecuta comando")
+
+' ==========================
+' Email Flow
+' ==========================
+
+Rel(generarNotificacionService, emailTemplateService, "Genera contenido")
+
+Rel(emailTemplateService, javaMailAdapter, "Envía correo")
+
+Rel(javaMailAdapter, smtpServer, "SMTP/TLS")
+
+' ==========================
+' Persistencia
+' ==========================
+
+Rel(generarNotificacionService, notificacionJpaAdapter, "Registra auditoría")
+
+Rel(notificacionJpaAdapter, notificacionJpaRepository, "Usa")
+
+Rel(notificacionJpaRepository, sql, "CRUD")
+
+SHOW_LEGEND()
+
+@enduml

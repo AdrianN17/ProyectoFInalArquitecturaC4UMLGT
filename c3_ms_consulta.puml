@@ -1,0 +1,178 @@
+@startuml
+
+!include <C4/C4_Component>
+
+title HEPAQ - MS Consultas\nC4 Nivel 3 (Component Diagram)
+
+Container_Boundary(msConsultas, "MS Consultas - Spring Boot WebFlux") {
+
+    ' ==========================
+    ' API Layer
+    ' ==========================
+
+    Component(consultasController, "ConsultasController", "REST Controller", "Endpoints REST generados con OpenAPI")
+
+    Component(consultaDelegate, "ConsultaDelegate", "Delegate", "Desacopla la lógica del controlador")
+
+    Component(consultaMapper, "ConsultaMapper", "MapStruct", "Transformación DTO ↔ Dominio ↔ Entity")
+
+    ' ==========================
+    ' Command Side
+    ' ==========================
+
+    Component(registrarConsultaService, "RegistrarConsultaService", "Command Service", "Registrar consulta médica")
+
+    Component(editarConsultaService, "EditarConsultaService", "Command Service", "Editar consulta médica")
+
+    Component(cancelarConsultaService, "CancelarConsultaService", "Command Service", "Cancelar consulta médica")
+
+    Component(consultaEventPublisher, "ConsultaEventPublisher", "Domain Event Publisher", "Publicación de eventos de dominio")
+
+    ' ==========================
+    ' Query Side
+    ' ==========================
+
+    Component(obtenerConsultaQuery, "ObtenerConsultaQuery", "Query Service", "Consulta detalle de atención")
+
+    Component(listarConsultasQuery, "ListarConsultasQuery", "Query Service", "Consulta listado de atenciones")
+
+    ' ==========================
+    ' Event Consumer
+    ' ==========================
+
+    Component(registrarConsultaConsumer, "RegistrarConsultaConsumer", "Azure Service Bus Consumer", "Consume eventos para registrar consultas")
+
+    ' ==========================
+    ' Adapters
+    ' ==========================
+
+    Component(consultaJpaAdapter, "ConsultaJpaAdapter", "Outbound Adapter", "Persistencia Azure SQL")
+
+    Component(consultaCosmosAdapter, "ConsultaCosmosAdapter", "Outbound Adapter", "Persistencia Cosmos DB")
+
+    Component(consultaRedisAdapter, "ConsultaRedisAdapter", "Outbound Adapter", "Administración de cache")
+
+    ' ==========================
+    ' Repositories
+    ' ==========================
+
+    Component(consultaJpaRepository, "ConsultaJpaRepository", "Spring Data JPA", "Acceso a Azure SQL")
+
+    Component(consultaCosmosRepository, "ConsultaCosmosRepository", "Spring Data Cosmos", "Acceso a Cosmos DB")
+
+    Component(consultaRedisRepository, "ConsultaRedisRepository", "Spring Data Redis", "Acceso a Redis")
+
+    ' ==========================
+    ' External Integrations
+    ' ==========================
+
+    Component(serviceBusPublisher, "ServiceBusPublisher", "Azure Service Bus Adapter", "Publicación de eventos")
+}
+
+Component_Ext(apim, "Azure API Management", "Gateway de entrada")
+
+ContainerDb_Ext(sql, "Azure SQL Database", "Write Model")
+
+ContainerDb_Ext(cosmos, "Azure Cosmos DB", "Read Model")
+
+ContainerDb_Ext(redis, "Azure Cache for Redis", "Cache Distribuido")
+
+ContainerQueue_Ext(serviceBus, "Azure Service Bus", "Eventos de Dominio")
+
+' ==========================
+' API Flow
+' ==========================
+
+Rel(apim, consultasController, "HTTPS")
+
+Rel(consultasController, consultaDelegate, "Delega")
+
+Rel(consultaDelegate, consultaMapper, "Mapea DTO")
+
+' ==========================
+' Commands
+' ==========================
+
+Rel(consultaDelegate, editarConsultaService, "Commands")
+
+Rel(consultaDelegate, cancelarConsultaService, "Commands")
+
+' ==========================
+' Queries
+' ==========================
+
+Rel(consultaDelegate, obtenerConsultaQuery, "Queries")
+
+Rel(consultaDelegate, listarConsultasQuery, "Queries")
+
+' ==========================
+' Event Consuming
+' ==========================
+
+Rel(serviceBus, registrarConsultaConsumer, "RegistrarConsultaCommand")
+
+Rel(registrarConsultaConsumer, registrarConsultaService, "Ejecuta comando")
+
+' ==========================
+' Azure SQL (Write Model)
+' ==========================
+
+Rel(registrarConsultaService, consultaJpaAdapter, "Inserta")
+
+Rel(editarConsultaService, consultaJpaAdapter, "Actualiza")
+
+Rel(cancelarConsultaService, consultaJpaAdapter, "Actualiza")
+
+Rel(consultaJpaAdapter, consultaJpaRepository, "Usa")
+
+Rel(consultaJpaRepository, sql, "CRUD")
+
+' ==========================
+' Cosmos DB (Read Model)
+' ==========================
+
+Rel(registrarConsultaService, consultaCosmosAdapter, "Actualiza Read Model")
+
+Rel(editarConsultaService, consultaCosmosAdapter, "Actualiza Read Model")
+
+Rel(cancelarConsultaService, consultaCosmosAdapter, "Actualiza Read Model")
+
+Rel(consultaCosmosAdapter, consultaCosmosRepository, "Usa")
+
+Rel(consultaCosmosRepository, cosmos, "CRUD")
+
+' ==========================
+' Redis Cache
+' ==========================
+
+Rel(registrarConsultaService, consultaRedisAdapter, "Invalida Cache")
+
+Rel(editarConsultaService, consultaRedisAdapter, "Invalida Cache")
+
+Rel(cancelarConsultaService, consultaRedisAdapter, "Invalida Cache")
+
+Rel(consultaRedisAdapter, consultaRedisRepository, "Usa")
+
+Rel(consultaRedisRepository, redis, "CRUD")
+
+Rel(obtenerConsultaQuery, consultaRedisAdapter, "Consulta Cache")
+
+Rel(listarConsultasQuery, consultaRedisAdapter, "Consulta Cache")
+
+Rel(obtenerConsultaQuery, consultaCosmosAdapter, "Fallback")
+
+Rel(listarConsultasQuery, consultaCosmosAdapter, "Fallback")
+
+' ==========================
+' Event Publishing
+' ==========================
+
+Rel(cancelarConsultaService, consultaEventPublisher, "ConsultaCanceladaEvent")
+
+Rel(consultaEventPublisher, serviceBusPublisher, "Publica")
+
+Rel(serviceBusPublisher, serviceBus, "Envía eventos")
+
+SHOW_LEGEND()
+
+@enduml

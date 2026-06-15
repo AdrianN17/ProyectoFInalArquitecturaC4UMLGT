@@ -1,0 +1,208 @@
+@startuml
+
+!include <C4/C4_Component>
+
+title HEPAQ - MS Citas\nC4 Nivel 3 (Component Diagram)
+
+Container_Boundary(msCitas, "MS Citas - Spring Boot WebFlux") {
+
+    ' ==========================
+    ' API Layer
+    ' ==========================
+
+    Component(citasController, "CitasController", "REST Controller", "Endpoints REST generados con OpenAPI")
+
+    Component(citaDelegate, "CitaDelegate", "Delegate", "Desacopla la lógica del controlador")
+
+    Component(citaMapper, "CitaMapper", "MapStruct", "Transformación DTO ↔ Dominio ↔ Entity")
+
+    ' ==========================
+    ' Command Side
+    ' ==========================
+
+    Component(agendarCitaService, "AgendarCitaService", "Command Service", "Registrar cita")
+
+    Component(cancelarCitaService, "CancelarCitaService", "Command Service", "Cancelar cita")
+
+    Component(reagendarCitaService, "ReagendarCitaService", "Command Service", "Reagendar cita")
+
+    Component(citaEventPublisher, "CitaEventPublisher", "Domain Event Publisher", "Publicación de eventos de dominio")
+
+    ' ==========================
+    ' Query Side
+    ' ==========================
+
+    Component(listarCitaQuery, "ListarCitaQuery", "Query Service", "Consulta listado de citas")
+
+    Component(obtenerCitaQuery, "ObtenerCitaQuery", "Query Service", "Consulta detalle de cita")
+
+    ' ==========================
+    ' Event Consumer
+    ' ==========================
+
+    Component(agendarCitaConsumer, "AgendarCitaConsumer", "Azure Service Bus Consumer", "Consume eventos para registrar citas")
+
+    ' ==========================
+    ' Adapters
+    ' ==========================
+
+    Component(citaJpaAdapter, "CitaJpaAdapter", "Outbound Adapter", "Persistencia Azure SQL")
+
+    Component(citaCosmosAdapter, "CitaCosmosAdapter", "Outbound Adapter", "Persistencia Cosmos DB")
+
+    Component(citaRedisAdapter, "CitaRedisAdapter", "Outbound Adapter", "Administración de cache")
+
+    ' ==========================
+    ' Repositories
+    ' ==========================
+
+    Component(citaJpaRepository, "CitaJpaRepository", "Spring Data JPA", "Acceso a Azure SQL")
+
+    Component(citaCosmosRepository, "CitaCosmosRepository", "Spring Data Cosmos", "Acceso a Cosmos DB")
+
+    Component(citaRedisRepository, "CitaRedisRepository", "Spring Data Redis", "Acceso a Redis")
+
+    ' ==========================
+    ' External Integrations
+    ' ==========================
+
+    Component(reniecWebClient, "ReniecWebClient", "Spring WebClient", "Integración con RENIEC")
+
+    Component(seguroWebClient, "SeguroWebClient", "Spring WebClient", "Integración con Sistema de Aseguramiento EsSalud")
+
+    Component(serviceBusPublisher, "ServiceBusPublisher", "Azure Service Bus Adapter", "Publicación de eventos")
+}
+
+Component_Ext(apim, "Azure API Management", "Gateway de entrada")
+
+System_Ext(reniec, "RENIEC", "Validación de identidad")
+
+System_Ext(seguro, "Sistema de Aseguramiento EsSalud", "Validación de cobertura")
+
+ContainerDb_Ext(sql, "Azure SQL Database", "Write Model")
+
+ContainerDb_Ext(cosmos, "Azure Cosmos DB", "Read Model")
+
+ContainerDb_Ext(redis, "Azure Cache for Redis", "Cache Distribuido")
+
+ContainerQueue_Ext(serviceBus, "Azure Service Bus", "Eventos de Dominio")
+
+' ==========================
+' API Flow
+' ==========================
+
+Rel(apim, citasController, "HTTPS")
+
+Rel(citasController, citaDelegate, "Delega")
+
+Rel(citaDelegate, citaMapper, "Mapea DTO")
+
+' ==========================
+' Commands
+' ==========================
+
+Rel(citaDelegate, agendarCitaService, "Commands")
+
+Rel(citaDelegate, cancelarCitaService, "Commands")
+
+Rel(citaDelegate, reagendarCitaService, "Commands")
+
+' ==========================
+' Queries
+' ==========================
+
+Rel(citaDelegate, listarCitaQuery, "Queries")
+
+Rel(citaDelegate, obtenerCitaQuery, "Queries")
+
+' ==========================
+' Event Consuming
+' ==========================
+
+Rel(serviceBus, agendarCitaConsumer, "AgendarCitaCommand")
+
+Rel(agendarCitaConsumer, agendarCitaService, "Ejecuta comando")
+
+' ==========================
+' RENIEC / EsSalud
+' ==========================
+
+Rel(agendarCitaService, reniecWebClient, "Valida identidad")
+
+Rel(agendarCitaService, seguroWebClient, "Valida cobertura")
+
+Rel(reagendarCitaService, reniecWebClient, "Valida identidad")
+
+Rel(reagendarCitaService, seguroWebClient, "Valida cobertura")
+
+Rel(reniecWebClient, reniec, "HTTPS")
+
+Rel(seguroWebClient, seguro, "HTTPS")
+
+' ==========================
+' Azure SQL (Write Model)
+' ==========================
+
+Rel(agendarCitaService, citaJpaAdapter, "Inserta")
+
+Rel(cancelarCitaService, citaJpaAdapter, "Actualiza")
+
+Rel(reagendarCitaService, citaJpaAdapter, "Actualiza")
+
+Rel(citaJpaAdapter, citaJpaRepository, "Usa")
+
+Rel(citaJpaRepository, sql, "CRUD")
+
+' ==========================
+' Cosmos DB (Read Model)
+' ==========================
+
+Rel(agendarCitaService, citaCosmosAdapter, "Actualiza Read Model")
+
+Rel(cancelarCitaService, citaCosmosAdapter, "Actualiza Read Model")
+
+Rel(reagendarCitaService, citaCosmosAdapter, "Actualiza Read Model")
+
+Rel(citaCosmosAdapter, citaCosmosRepository, "Usa")
+
+Rel(citaCosmosRepository, cosmos, "CRUD")
+
+' ==========================
+' Redis Cache
+' ==========================
+
+Rel(agendarCitaService, citaRedisAdapter, "Invalida Cache")
+
+Rel(cancelarCitaService, citaRedisAdapter, "Invalida Cache")
+
+Rel(reagendarCitaService, citaRedisAdapter, "Invalida Cache")
+
+Rel(citaRedisAdapter, citaRedisRepository, "Usa")
+
+Rel(citaRedisRepository, redis, "CRUD")
+
+Rel(listarCitaQuery, citaRedisAdapter, "Consulta Cache")
+
+Rel(obtenerCitaQuery, citaRedisAdapter, "Consulta Cache")
+
+Rel(listarCitaQuery, citaCosmosAdapter, "Fallback")
+
+Rel(obtenerCitaQuery, citaCosmosAdapter, "Fallback")
+
+' ==========================
+' Event Publishing
+' ==========================
+
+Rel(agendarCitaService, citaEventPublisher, "CitaAgendadaEvent")
+
+Rel(cancelarCitaService, citaEventPublisher, "CitaCanceladaEvent")
+
+Rel(reagendarCitaService, citaEventPublisher, "CitaReagendadaEvent")
+
+Rel(citaEventPublisher, serviceBusPublisher, "Publica")
+
+Rel(serviceBusPublisher, serviceBus, "Envía eventos")
+
+SHOW_LEGEND()
+
+@enduml
