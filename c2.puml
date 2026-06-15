@@ -1,0 +1,167 @@
+@startuml
+
+!include <C4/C4_Container>
+
+title HEPAQ - Sistema de Gestión Médica\nC4 Nivel 2 (Container Diagram)
+
+Person(paciente, "Paciente", "Gestiona citas y consulta resultados")
+Person(medico, "Médico", "Realiza consultas médicas y diagnósticos")
+Person(administrativo, "Personal Administrativo", "Gestiona pacientes y agenda atenciones")
+
+System_Ext(entraId, "Microsoft Entra ID", "Proveedor de identidad y autenticación OAuth2/OpenID Connect")
+
+System_Boundary(hepaq, "HEPAQ") {
+
+    Container(web, "HEPAQ Web", "Angular", "Portal para personal médico y administrativo")
+
+    Container(mobile, "HEPAQ Mobile", "Angular + Capacitor", "Portal para pacientes")
+
+    Container(apiGateway, "Azure API Management", "APIM", "Gateway centralizado, autenticación, autorización, rate limiting y enrutamiento")
+
+    Boundary(sharedInfra, "Infraestructura Compartida") {
+
+        Container(cache, "Azure Cache for Redis", "Redis Cluster", "Cache distribuido para consultas frecuentes")
+
+        ContainerQueue(eventBus, "Azure Service Bus", "Message Broker", "Eventos de dominio y sincronización CQRS")
+
+        Container(keyVault, "Azure Key Vault", "Secrets Management", "Gestión segura de secretos, certificados y claves")
+
+        Container(storage, "Azure Storage Account", "Blob Storage", "Imágenes médicas, documentos clínicos y archivos adjuntos")
+    }
+
+    Boundary(cqrsCitas, "CQRS - Citas") {
+
+        Container(citas, "MS Citas", "Java Spring Boot WebFlux", "Programación y seguimiento de citas médicas")
+
+        ContainerDb(citasWriteDb, "Azure SQL - Citas", "Azure SQL Database", "Modelo de escritura (Commands)")
+
+        ContainerDb(citasReadDb, "Cosmos DB - Citas", "Azure Cosmos DB", "Modelo de lectura (Queries)")
+
+        System_Ext(reniec, "RENIEC", "Validación de identidad")
+
+        System_Ext(seguro, "Sistema de Aseguramiento EsSalud", "Validación de cobertura")
+    }
+
+    Boundary(cqrsConsultas, "CQRS - Consultas") {
+
+        Container(consultas, "MS Consultas", "Java Spring Boot WebFlux", "Gestión de atenciones médicas e historia clínica")
+
+        ContainerDb(consultasWriteDb, "Azure SQL - Consultas", "Azure SQL Database", "Modelo de escritura (Commands)")
+
+        ContainerDb(consultasReadDb, "Cosmos DB - Consultas", "Azure Cosmos DB", "Modelo de lectura (Queries)")
+    }
+
+    Boundary(cqrsDiagnosticos, "CQRS - Diagnósticos") {
+
+        Container(diagnosticos, "MS Diagnósticos", "Java Spring Boot WebFlux", "Registro y consulta de diagnósticos")
+
+        ContainerDb(diagnosticosWriteDb, "Azure SQL - Diagnósticos", "Azure SQL Database", "Modelo de escritura (Commands)")
+
+        ContainerDb(diagnosticosReadDb, "Cosmos DB - Diagnósticos", "Azure Cosmos DB", "Modelo de lectura (Queries)")
+    }
+
+    Boundary(cqrsExamenes, "CQRS - Exámenes") {
+
+        Container(examenes, "MS Exámenes", "Java Spring Boot WebFlux", "Gestión de laboratorios y estudios médicos")
+
+        ContainerDb(examenesWriteDb, "Azure SQL - Exámenes", "Azure SQL Database", "Modelo de escritura (Commands)")
+
+        ContainerDb(examenesReadDb, "Cosmos DB - Exámenes", "Azure Cosmos DB", "Modelo de lectura (Queries)")
+    }
+}
+
+' ==========================
+' Usuarios
+' ==========================
+
+Rel(paciente, mobile, "Utiliza")
+
+Rel(medico, web, "Utiliza")
+
+Rel(administrativo, web, "Utiliza")
+
+' ==========================
+' Autenticación
+' ==========================
+
+Rel(web, entraId, "Autenticación OAuth2/OIDC")
+
+Rel(mobile, entraId, "Autenticación OAuth2/OIDC")
+
+Rel(apiGateway, entraId, "Valida Access Tokens")
+
+' ==========================
+' Frontend -> APIM
+' ==========================
+
+Rel(web, apiGateway, "HTTPS + JWT")
+
+Rel(mobile, apiGateway, "HTTPS + JWT")
+
+' ==========================
+' APIM -> Microservicios
+' ==========================
+
+Rel(apiGateway, citas, "Enruta solicitudes")
+
+Rel(apiGateway, consultas, "Enruta solicitudes")
+
+Rel(apiGateway, diagnosticos, "Enruta solicitudes")
+
+Rel(apiGateway, examenes, "Enruta solicitudes")
+
+' ==========================
+' CQRS - Commands / Queries
+' ==========================
+
+Rel(citas, citasWriteDb, "Commands")
+
+Rel(citas, citasReadDb, "Queries")
+
+Rel(consultas, consultasWriteDb, "Commands")
+
+Rel(consultas, consultasReadDb, "Queries")
+
+Rel(diagnosticos, diagnosticosWriteDb, "Commands")
+
+Rel(diagnosticos, diagnosticosReadDb, "Queries")
+
+Rel(examenes, examenesWriteDb, "Commands")
+
+Rel(examenes, examenesReadDb, "Queries")
+
+' ==========================
+' Event Driven Architecture
+' ==========================
+
+Rel(citas, eventBus, "Publica y consume eventos")
+
+Rel(consultas, eventBus, "Publica y consume eventos")
+
+Rel(diagnosticos, eventBus, "Publica y consume eventos")
+
+Rel(examenes, eventBus, "Publica y consume eventos")
+
+' ==========================
+' Seguridad
+' ==========================
+
+Rel(apiGateway, keyVault, "Obtiene certificados y secretos")
+
+' ==========================
+' Almacenamiento documental
+' ==========================
+
+Rel(examenes, storage, "Almacena imágenes médicas y documentos")
+
+' ==========================
+' Integraciones de negocio
+' ==========================
+
+Rel(citas, reniec, "Valida identidad")
+
+Rel(citas, seguro, "Verifica cobertura del asegurado")
+
+SHOW_LEGEND()
+
+@enduml

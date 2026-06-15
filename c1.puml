@@ -1,0 +1,25 @@
+@startuml
+
+!include <C4/C4_Context>
+
+title HEPAQ - Sistema de Gestión Médica\nC4 - Nivel 1 (System Context)
+
+Person(medico, "Médico", "Realiza consultas, registra diagnósticos y solicita exámenes médicos")
+Person(digitador, "Digitador", "Registra pacientes y coordina la programación de atenciones médicas")
+Person(paciente, "Paciente", "Programa citas, consulta resultados y realiza el seguimiento de su atención médica")
+
+System(hepaq, "HEPAQ", "Plataforma de gestión de atenciones médicas para EsSalud")
+
+System_Ext(reniec, "RENIEC", "Servicio de validación y consulta de identidad de los pacientes")
+System_Ext(seguro, "Sistema de Aseguramiento EsSalud", "Verificación de cobertura y vigencia de los asegurados")
+
+Rel(medico, hepaq, "Gestiona consultas, diagnósticos y exámenes")
+Rel(digitador, hepaq, "Administra pacientes y agenda atenciones")
+Rel(paciente, hepaq, "Programa citas y consulta resultados médicos")
+
+Rel(hepaq, reniec, "Valida la identidad del paciente")
+Rel(hepaq, seguro, "Verifica la cobertura del asegurado")
+
+SHOW_LEGEND()
+
+@enduml
