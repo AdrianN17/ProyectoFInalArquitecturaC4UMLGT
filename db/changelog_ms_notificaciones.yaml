@@ -1,0 +1,491 @@
+databaseChangeLog:
+
+  # ================================================
+  # CHANGESET 001 — Tabla principal: notificaciones
+  # ================================================
+  - changeSet:
+      id: "001-create-table-notificaciones"
+      author: "hepaq"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: notificaciones
+      changes:
+        - createTable:
+            tableName: notificaciones
+            remarks: "Tabla de notificaciones enviadas o pendientes — registro de auditoría"
+            columns:
+              - column:
+                  name: id
+                  type: uniqueidentifier
+                  remarks: "Identificador único UUID de la notificación"
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: destinatario_id
+                  type: varchar(50)
+                  remarks: "ID del destinatario (paciente_id, medico_id, etc.)"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: destinatario_email
+                  type: varchar(320)
+                  remarks: "Email del destinatario (nullable si el canal no es EMAIL)"
+              - column:
+                  name: destinatario_telefono
+                  type: varchar(20)
+                  remarks: "Número de teléfono E.164 para SMS (nullable)"
+              - column:
+                  name: canal
+                  type: varchar(20)
+                  remarks: "EMAIL | SMS | PUSH | EMAIL_SMS"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: tipo
+                  type: varchar(50)
+                  remarks: "Tipo de evento: CITA_AGENDADA, CITA_CANCELADA, EXAMEN_COMPLETADO, etc."
+                  constraints:
+                    nullable: false
+              - column:
+                  name: asunto
+                  type: nvarchar(200)
+                  remarks: "Asunto del email o título de la notificación"
+              - column:
+                  name: cuerpo
+                  type: nvarchar(max)
+                  remarks: "Contenido renderizado de la notificación (HTML o texto)"
+              - column:
+                  name: estado
+                  type: varchar(20)
+                  defaultValue: "PENDIENTE"
+                  remarks: "PENDIENTE | ENVIADA | FALLIDA | REINTENTANDO"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: intentos_actuales
+                  type: int
+                  defaultValueNumeric: 0
+                  remarks: "Número de intentos de envío realizados"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: max_reintentos
+                  type: int
+                  defaultValueNumeric: 3
+                  remarks: "Máximo de reintentos configurados"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: entidad_origen_tipo
+                  type: varchar(50)
+                  remarks: "Tipo de entidad que originó el evento: CITA, CONSULTA, EXAMEN, DIAGNOSTICO"
+              - column:
+                  name: entidad_origen_id
+                  type: uniqueidentifier
+                  remarks: "ID de la entidad que originó el evento"
+              - column:
+                  name: codigo_plantilla
+                  type: varchar(100)
+                  remarks: "Código de la plantilla Thymeleaf usada (FK referencial)"
+              - column:
+                  name: fecha_programada
+                  type: datetime2(0)
+                  remarks: "Fecha programada para el envío (nullable = envío inmediato)"
+              - column:
+                  name: fecha_envio
+                  type: datetime2(0)
+                  remarks: "Timestamp de envío exitoso (nullable si aún no se ha enviado)"
+              - column:
+                  name: fecha_creacion
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fecha_actualizacion
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+
+  # ================================================
+  # CHANGESET 002 — Tabla de intentos de envío
+  # ================================================
+  - changeSet:
+      id: "002-create-table-notificaciones-intentos"
+      author: "hepaq"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: notificaciones_intentos
+      changes:
+        - createTable:
+            tableName: notificaciones_intentos
+            remarks: "Historial detallado de cada intento de envío de una notificación"
+            columns:
+              - column:
+                  name: id
+                  type: uniqueidentifier
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: notificacion_id
+                  type: uniqueidentifier
+                  constraints:
+                    nullable: false
+              - column:
+                  name: numero_intento
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: exitoso
+                  type: bit
+                  constraints:
+                    nullable: false
+              - column:
+                  name: error_mensaje
+                  type: nvarchar(1000)
+                  remarks: "Mensaje de error completo si el intento falló"
+              - column:
+                  name: error_codigo
+                  type: varchar(50)
+                  remarks: "Código de error del proveedor (SMTP, SMS gateway, etc.)"
+              - column:
+                  name: proveedor_response
+                  type: nvarchar(max)
+                  remarks: "Respuesta completa del proveedor (JSON o texto)"
+              - column:
+                  name: timestamp
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+
+        - addForeignKeyConstraint:
+            baseTableName: notificaciones_intentos
+            baseColumnNames: notificacion_id
+            constraintName: fk_intentos_notificacion_id
+            referencedTableName: notificaciones
+            referencedColumnNames: id
+            onDelete: CASCADE
+
+  # ================================================
+  # CHANGESET 003 — Tabla de plantillas
+  # ================================================
+  - changeSet:
+      id: "003-create-table-plantillas-notificacion"
+      author: "hepaq"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: plantillas_notificacion
+      changes:
+        - createTable:
+            tableName: plantillas_notificacion
+            remarks: "Catálogo de plantillas Thymeleaf para notificaciones"
+            columns:
+              - column:
+                  name: id
+                  type: uniqueidentifier
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: codigo
+                  type: varchar(100)
+                  remarks: "Clave única: CITA_AGENDADA_EMAIL, CITA_CANCELADA_EMAIL, etc."
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: nombre
+                  type: varchar(200)
+                  remarks: "Nombre descriptivo de la plantilla"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: canal
+                  type: varchar(20)
+                  remarks: "Canal destino: EMAIL | SMS | PUSH"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: asunto_template
+                  type: nvarchar(500)
+                  remarks: "Asunto con variables Thymeleaf: Cita confirmada para {{pacienteNombre}}"
+              - column:
+                  name: cuerpo_template
+                  type: nvarchar(max)
+                  remarks: "Cuerpo HTML o texto con expresiones Thymeleaf"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: variables_requeridas
+                  type: nvarchar(1000)
+                  remarks: "JSON array de variables esperadas: [\"pacienteNombre\",\"fechaCita\"]"
+              - column:
+                  name: activa
+                  type: bit
+                  defaultValueBoolean: true
+                  remarks: "Indica si la plantilla está activa y puede usarse"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version_plantilla
+                  type: int
+                  defaultValueNumeric: 1
+                  remarks: "Versión de la plantilla para control de cambios"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fecha_creacion
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fecha_actualizacion
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+
+        - addUniqueConstraint:
+            tableName: plantillas_notificacion
+            columnNames: codigo
+            constraintName: uidx_plantillas_codigo
+
+  # ================================================
+  # CHANGESET 004 — Índices de rendimiento
+  # ================================================
+  - changeSet:
+      id: "004-indexes-notificaciones"
+      author: "hepaq"
+      changes:
+        - createIndex:
+            indexName: idx_notif_destinatario_estado
+            tableName: notificaciones
+            columns:
+              - column:
+                  name: destinatario_id
+              - column:
+                  name: estado
+
+        - createIndex:
+            indexName: idx_notif_estado_fecha
+            tableName: notificaciones
+            columns:
+              - column:
+                  name: estado
+              - column:
+                  name: fecha_creacion
+                  descending: true
+
+        # Para el scheduler de reintentos
+        - createIndex:
+            indexName: idx_notif_fallidas_reintentos
+            tableName: notificaciones
+            columns:
+              - column:
+                  name: estado
+              - column:
+                  name: intentos_actuales
+              - column:
+                  name: fecha_actualizacion
+
+        - createIndex:
+            indexName: idx_notif_entidad_origen
+            tableName: notificaciones
+            columns:
+              - column:
+                  name: entidad_origen_tipo
+              - column:
+                  name: entidad_origen_id
+
+        - createIndex:
+            indexName: idx_intentos_notificacion_id
+            tableName: notificaciones_intentos
+            columns:
+              - column:
+                  name: notificacion_id
+              - column:
+                  name: numero_intento
+
+        - createIndex:
+            indexName: idx_plantillas_codigo
+            tableName: plantillas_notificacion
+            columns:
+              - column:
+                  name: codigo
+
+        - createIndex:
+            indexName: idx_plantillas_canal_activa
+            tableName: plantillas_notificacion
+            columns:
+              - column:
+                  name: canal
+              - column:
+                  name: activa
+
+  # ================================================
+  # CHANGESET 005 — Constraints de dominio
+  # ================================================
+  - changeSet:
+      id: "005-constraints-notificaciones"
+      author: "hepaq"
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE notificaciones
+              ADD CONSTRAINT chk_notif_canal
+              CHECK (canal IN ('EMAIL', 'SMS', 'PUSH', 'EMAIL_SMS'));
+
+        - sql:
+            sql: |
+              ALTER TABLE notificaciones
+              ADD CONSTRAINT chk_notif_estado
+              CHECK (estado IN ('PENDIENTE', 'ENVIADA', 'FALLIDA', 'REINTENTANDO'));
+
+        - sql:
+            sql: |
+              ALTER TABLE notificaciones
+              ADD CONSTRAINT chk_notif_reintentos
+              CHECK (intentos_actuales >= 0 AND intentos_actuales <= max_reintentos);
+
+        - sql:
+            sql: |
+              ALTER TABLE plantillas_notificacion
+              ADD CONSTRAINT chk_plantillas_canal
+              CHECK (canal IN ('EMAIL', 'SMS', 'PUSH'));
+
+  # ================================================
+  # CHANGESET 006 — Datos iniciales de plantillas
+  # ================================================
+  - changeSet:
+      id: "006-data-plantillas-iniciales"
+      author: "hepaq"
+      context: "!test"
+      changes:
+        - insert:
+            tableName: plantillas_notificacion
+            columns:
+              - column:
+                  name: id
+                  value: "a1b2c3d4-0001-0001-0001-000000000001"
+              - column:
+                  name: codigo
+                  value: "CITA_AGENDADA_EMAIL"
+              - column:
+                  name: nombre
+                  value: "Confirmación de Cita Médica"
+              - column:
+                  name: canal
+                  value: "EMAIL"
+              - column:
+                  name: asunto_template
+                  value: "Confirmación de cita médica para el {{fechaCita}}"
+              - column:
+                  name: cuerpo_template
+                  value: >-
+                    <html><body>
+                    <h2>Estimado/a <span th:text="${pacienteNombre}"></span>,</h2>
+                    <p>Su cita médica ha sido confirmada para el <strong th:text="${fechaCita}"></strong>
+                    con el <strong th:text="${medicoNombre}"></strong>.</p>
+                    <p>Especialidad: <span th:text="${especialidad}"></span></p>
+                    <p>Por favor llegue 15 minutos antes.</p>
+                    <p>EsSalud — HEPAQ</p>
+                    </body></html>
+              - column:
+                  name: variables_requeridas
+                  value: '["pacienteNombre","fechaCita","medicoNombre","especialidad"]'
+              - column:
+                  name: activa
+                  valueBoolean: true
+              - column:
+                  name: version_plantilla
+                  valueNumeric: 1
+
+        - insert:
+            tableName: plantillas_notificacion
+            columns:
+              - column:
+                  name: id
+                  value: "a1b2c3d4-0002-0002-0002-000000000002"
+              - column:
+                  name: codigo
+                  value: "CITA_CANCELADA_EMAIL"
+              - column:
+                  name: nombre
+                  value: "Cancelación de Cita Médica"
+              - column:
+                  name: canal
+                  value: "EMAIL"
+              - column:
+                  name: asunto_template
+                  value: "Su cita médica ha sido cancelada"
+              - column:
+                  name: cuerpo_template
+                  value: >-
+                    <html><body>
+                    <h2>Estimado/a <span th:text="${pacienteNombre}"></span>,</h2>
+                    <p>Su cita médica programada para el <strong th:text="${fechaCita}"></strong>
+                    ha sido <strong>cancelada</strong>.</p>
+                    <p>Motivo: <span th:text="${motivoCancelacion}"></span></p>
+                    <p>Para reagendar comuníquese con su establecimiento de salud.</p>
+                    <p>EsSalud — HEPAQ</p>
+                    </body></html>
+              - column:
+                  name: variables_requeridas
+                  value: '["pacienteNombre","fechaCita","motivoCancelacion"]'
+              - column:
+                  name: activa
+                  valueBoolean: true
+              - column:
+                  name: version_plantilla
+                  valueNumeric: 1
+
+        - insert:
+            tableName: plantillas_notificacion
+            columns:
+              - column:
+                  name: id
+                  value: "a1b2c3d4-0003-0003-0003-000000000003"
+              - column:
+                  name: codigo
+                  value: "EXAMEN_COMPLETADO_EMAIL"
+              - column:
+                  name: nombre
+                  value: "Resultados de Examen Disponibles"
+              - column:
+                  name: canal
+                  value: "EMAIL"
+              - column:
+                  name: asunto_template
+                  value: "Sus resultados de {{tipoExamen}} ya están disponibles"
+              - column:
+                  name: cuerpo_template
+                  value: >-
+                    <html><body>
+                    <h2>Estimado/a <span th:text="${pacienteNombre}"></span>,</h2>
+                    <p>Los resultados de su <strong th:text="${tipoExamen}"></strong>
+                    realizado el <span th:text="${fechaExamen}"></span> ya se encuentran disponibles.</p>
+                    <p>Puede consultarlos en el portal de pacientes o acercarse a su
+                    médico tratante <span th:text="${medicoNombre}"></span>.</p>
+                    <p>EsSalud — HEPAQ</p>
+                    </body></html>
+              - column:
+                  name: variables_requeridas
+                  value: '["pacienteNombre","tipoExamen","fechaExamen","medicoNombre"]'
+              - column:
+                  name: activa
+                  valueBoolean: true
+              - column:
+                  name: version_plantilla
+                  valueNumeric: 1

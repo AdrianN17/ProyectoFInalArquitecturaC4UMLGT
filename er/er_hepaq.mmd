@@ -1,0 +1,212 @@
+---
+title: HEPAQ — Diagrama Entidad-Relación (Modelo de Escritura · Azure SQL)
+---
+erDiagram
+
+    %% ================================================================
+    %% MS CITAS — db_citas (Azure SQL)
+    %% ================================================================
+
+    citas {
+        uuid          id                   PK  "Identificador único UUID"
+        varchar       paciente_id              "DNI paciente (validado RENIEC)"
+        varchar       medico_id                "Código médico (Directorio Médico)"
+        datetime      fecha_hora               "Fecha y hora programada"
+        varchar       tipo                     "CONSULTA_MEDICA|LABORATORIO|ECOGRAFIA"
+        varchar       estado                   "PENDIENTE|CONFIRMADA|CANCELADA|REPROGRAMADA"
+        nvarchar      motivo_cita              "Descripción del motivo"
+        nvarchar      motivo_cancelacion       "Razón de cancelación (nullable)"
+        datetime      fecha_creacion           "DEFAULT GETUTCDATE()"
+        datetime      fecha_actualizacion      "DEFAULT GETUTCDATE()"
+        varchar       creado_por               "Usuario o servicio creador"
+        int           version                  "Optimistic locking (DEFAULT 0)"
+    }
+
+    citas_auditoria {
+        uuid          id                   PK  "UUID del registro de auditoría"
+        uuid          cita_id              FK  "→ citas.id CASCADE DELETE"
+        varchar       estado_anterior          "Estado antes del cambio (nullable)"
+        varchar       estado_nuevo             "Estado después del cambio"
+        nvarchar      motivo                   "Motivo del cambio (nullable)"
+        varchar       usuario_id               "Quien realizó el cambio"
+        datetime      timestamp                "DEFAULT GETUTCDATE()"
+    }
+
+    citas           ||--o{ citas_auditoria     : "genera auditoría"
+
+    %% ================================================================
+    %% MS CONSULTAS — db_consultas (Azure SQL)
+    %% ================================================================
+
+    consultas {
+        uuid          id                   PK  "UUID de la consulta"
+        varchar       paciente_id              "DNI paciente"
+        varchar       medico_id                "Código médico"
+        uuid          cita_id              FK  "→ citas.id [lógico cross-DB]"
+        datetime      fecha_hora               "Fecha y hora de la atención"
+        varchar       tipo                     "PRIMERA_VEZ|CONTROL|SEGUIMIENTO|EMERGENCIA"
+        varchar       estado                   "PENDIENTE|EN_CURSO|COMPLETADA|CANCELADA"
+        nvarchar      motivo_consulta          "Motivo referido por el paciente"
+        text          anamnesis                "Síntomas y antecedentes"
+        text          examen_fisico            "Hallazgos del examen físico"
+        text          observaciones            "Observaciones clínicas"
+        text          tratamiento              "Plan de tratamiento"
+        nvarchar      motivo_cancelacion       "Razón de cancelación (nullable)"
+        datetime      fecha_creacion           "DEFAULT GETUTCDATE()"
+        datetime      fecha_actualizacion      "DEFAULT GETUTCDATE()"
+        varchar       creado_por               "Usuario o servicio creador"
+        int           version                  "Optimistic locking"
+    }
+
+    signos_vitales {
+        uuid          id                   PK  "UUID de los signos vitales"
+        uuid          consulta_id          FK  "→ consultas.id CASCADE DELETE"
+        int           presion_sistolica        "mmHg (nullable)"
+        int           presion_diastolica       "mmHg (nullable)"
+        int           frecuencia_cardiaca      "lpm (nullable)"
+        int           frecuencia_respiratoria  "rpm (nullable)"
+        decimal       temperatura              "°C decimal(4,1)"
+        decimal       peso_kg                  "kg decimal(5,2)"
+        decimal       talla_cm                 "cm decimal(5,1)"
+        decimal       saturacion_oxigeno       "% decimal(4,1)"
+        int           glucosa_capilar          "mg/dL (nullable)"
+        varchar       registrado_por           "Profesional que tomó los signos"
+        datetime      fecha_registro           "DEFAULT GETUTCDATE()"
+    }
+
+    consultas       ||--o|  signos_vitales     : "tiene signos"
+
+    %% ================================================================
+    %% MS DIAGNÓSTICOS — db_diagnosticos (Azure SQL)
+    %% ================================================================
+
+    diagnosticos {
+        uuid          id                   PK  "UUID del diagnóstico"
+        varchar       paciente_id              "DNI paciente"
+        varchar       medico_id                "Código médico"
+        uuid          consulta_id          FK  "→ consultas.id [lógico cross-DB]"
+        varchar       codigo_cie               "Código CIE-10 (ej. I10, J45.0)"
+        nvarchar      descripcion              "Descripción libre del diagnóstico"
+        varchar       tipo                     "PRESUNTIVO|DEFINITIVO|DIFERENCIAL|SECUNDARIO"
+        varchar       estado                   "ACTIVO|RESUELTO|CRONICO|ELIMINADO"
+        text          notas_medicas            "Notas clínicas del médico"
+        text          tratamiento_sugerido     "Plan de tratamiento"
+        nvarchar      motivo_eliminacion       "Motivo del soft delete"
+        datetime      fecha_registro           "DEFAULT GETUTCDATE()"
+        datetime      fecha_actualizacion      "DEFAULT GETUTCDATE()"
+        varchar       eliminado_por            "Usuario que eliminó lógicamente"
+        int           version                  "Optimistic locking"
+    }
+
+    diagnosticos_auditoria {
+        uuid          id                   PK  "UUID del registro de auditoría"
+        uuid          diagnostico_id       FK  "→ diagnosticos.id CASCADE DELETE"
+        varchar       estado_anterior          "Estado antes del cambio"
+        varchar       estado_nuevo             "Estado después del cambio"
+        varchar       accion                   "INSERT|UPDATE_ESTADO|SOFT_DELETE"
+        varchar       usuario_id               "Quien realizó la acción"
+        datetime      timestamp                "DEFAULT GETUTCDATE()"
+    }
+
+    diagnosticos    ||--o{ diagnosticos_auditoria : "genera auditoría"
+
+    %% ================================================================
+    %% MS EXÁMENES — db_examenes (Azure SQL)
+    %% ================================================================
+
+    examenes {
+        uuid          id                   PK  "UUID del examen"
+        varchar       paciente_id              "DNI paciente"
+        varchar       medico_id                "Código médico solicitante"
+        uuid          consulta_id          FK  "→ consultas.id [lógico cross-DB]"
+        varchar       tipo                     "LABORATORIO|IMAGEN|ECOGRAFIA|RAYOS_X|TOMOGRAFIA|RESONANCIA"
+        varchar       estado                   "PENDIENTE|EN_PROCESO|COMPLETADO|CANCELADO|ELIMINADO"
+        nvarchar      descripcion              "Nombre o descripción del examen"
+        nvarchar      indicaciones_previas     "Instrucciones al paciente"
+        text          resultados               "Resultados en texto libre"
+        text          interpretacion           "Interpretación clínica"
+        nvarchar      motivo_cancelacion       "Razón de cancelación"
+        nvarchar      motivo_eliminacion       "Motivo del soft delete"
+        datetime      fecha_solicitud          "Cuándo se solicitó"
+        datetime      fecha_resultado          "Cuándo se registraron resultados (nullable)"
+        datetime      fecha_creacion           "DEFAULT GETUTCDATE()"
+        datetime      fecha_actualizacion      "DEFAULT GETUTCDATE()"
+        int           version                  "Optimistic locking"
+    }
+
+    adjuntos_examen {
+        uuid          id                   PK  "UUID del adjunto"
+        uuid          examen_id            FK  "→ examenes.id CASCADE DELETE"
+        varchar       nombre_archivo           "Nombre original del archivo"
+        varchar       url_blob                 "URL en Azure Blob Storage"
+        varchar       content_type             "MIME type (jpeg/png/pdf/dicom/mp4)"
+        bigint        tamanio_bytes            "Tamaño en bytes (max 52 428 800 = 50 MB)"
+        varchar       container_blob           "Container Azure Blob (DEFAULT examenes-adjuntos)"
+        varchar       subido_por               "Usuario que subió el archivo"
+        bit           activo                   "Soft delete (DEFAULT 1)"
+        datetime      fecha_subida             "DEFAULT GETUTCDATE()"
+    }
+
+    examenes        ||--o{ adjuntos_examen     : "tiene adjuntos"
+
+    %% ================================================================
+    %% MS NOTIFICACIONES — db_notificaciones (Azure SQL)
+    %% ================================================================
+
+    plantillas_notificacion {
+        uuid          id                   PK  "UUID de la plantilla"
+        varchar       codigo               UK  "Clave única: CITA_AGENDADA_EMAIL, etc."
+        varchar       nombre                   "Nombre descriptivo"
+        varchar       canal                    "EMAIL|SMS|PUSH"
+        nvarchar      asunto_template          "Asunto con variables Thymeleaf"
+        text          cuerpo_template          "HTML/texto con expresiones Thymeleaf"
+        nvarchar      variables_requeridas     "JSON array de variables esperadas"
+        bit           activa                   "DEFAULT 1"
+        int           version_plantilla        "Control de versiones (DEFAULT 1)"
+        datetime      fecha_creacion           "DEFAULT GETUTCDATE()"
+        datetime      fecha_actualizacion      "DEFAULT GETUTCDATE()"
+    }
+
+    notificaciones {
+        uuid          id                   PK  "UUID de la notificación"
+        varchar       destinatario_id          "ID del destinatario"
+        varchar       destinatario_email       "Email (nullable si canal != EMAIL)"
+        varchar       destinatario_telefono    "Teléfono E.164 (nullable)"
+        varchar       canal                    "EMAIL|SMS|PUSH|EMAIL_SMS"
+        varchar       tipo                     "CITA_AGENDADA|CITA_CANCELADA|EXAMEN_COMPLETADO…"
+        nvarchar      asunto                   "Asunto renderizado"
+        text          cuerpo                   "Cuerpo renderizado"
+        varchar       estado                   "PENDIENTE|ENVIADA|FALLIDA|REINTENTANDO"
+        int           intentos_actuales        "DEFAULT 0"
+        int           max_reintentos           "DEFAULT 3"
+        varchar       entidad_origen_tipo      "CITA|CONSULTA|EXAMEN|DIAGNOSTICO"
+        uuid          entidad_origen_id        "ID de la entidad origen del evento"
+        varchar       codigo_plantilla     FK  "→ plantillas_notificacion.codigo"
+        datetime      fecha_programada         "Envío diferido (nullable = inmediato)"
+        datetime      fecha_envio              "Timestamp de envío exitoso (nullable)"
+        datetime      fecha_creacion           "DEFAULT GETUTCDATE()"
+        datetime      fecha_actualizacion      "DEFAULT GETUTCDATE()"
+    }
+
+    notificaciones_intentos {
+        uuid          id                   PK  "UUID del intento"
+        uuid          notificacion_id      FK  "→ notificaciones.id CASCADE DELETE"
+        int           numero_intento           "Número secuencial del intento"
+        bit           exitoso                  "1=éxito, 0=fallo"
+        nvarchar      error_mensaje            "Mensaje de error (nullable)"
+        varchar       error_codigo             "Código del proveedor (nullable)"
+        text          proveedor_response       "Respuesta completa del proveedor"
+        datetime      timestamp                "DEFAULT GETUTCDATE()"
+    }
+
+    plantillas_notificacion ||--o{ notificaciones          : "es usada por"
+    notificaciones          ||--o{ notificaciones_intentos : "registra intentos"
+
+    %% ================================================================
+    %% RELACIONES LÓGICAS CROSS-MICROSERVICIO
+    %% (sin FK física — cada MS tiene su propia base de datos Azure SQL)
+    %% ================================================================
+
+    citas           ||--o|  consultas          : "origina [cross-DB]"
+    consultas       ||--o{  diagnosticos       : "genera [cross-DB]"
+    consultas       ||--o{  examenes           : "solicita [cross-DB]"

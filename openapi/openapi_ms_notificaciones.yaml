@@ -1,0 +1,603 @@
+openapi: "3.0.3"
+
+info:
+  title: HEPAQ - MS Notificaciones API
+  description: |
+    API REST de auditoría y administración para el servicio de notificaciones de la plataforma HEPAQ.
+    El envío de notificaciones es 100% event-driven vía Azure Service Bus.
+    Esta API expone endpoints de consulta del historial, reintento manual de fallidas y administración de plantillas.
+    Implementa los patrones Strategy, Composite (multi-canal) y Factory para el envío de notificaciones.
+  version: "1.0.0"
+  contact:
+    name: HEPAQ Dev Team
+    email: dev@hepaq.pe
+
+servers:
+  - url: https://api.hepaq.pe/notificaciones/v1
+    description: Producción
+  - url: https://api-dev.hepaq.pe/notificaciones/v1
+    description: Desarrollo / QA
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Notificaciones
+    description: Historial y auditoría de notificaciones enviadas
+  - name: Administración
+    description: Operaciones administrativas — reintento de fallidas y gestión de plantillas
+
+paths:
+
+  /notificaciones:
+    get:
+      tags: [Notificaciones]
+      operationId: listarNotificaciones
+      summary: Listar historial de notificaciones
+      description: |
+        Retorna el historial paginado de notificaciones de un paciente.
+        Requiere rol administrativo o de médico para consultar notificaciones de otros pacientes.
+      parameters:
+        - name: pacienteId
+          in: query
+          description: Filtrar por identificador del paciente
+          schema:
+            type: string
+        - name: tipo
+          in: query
+          description: Filtrar por tipo de notificación
+          schema:
+            $ref: '#/components/schemas/TipoNotificacion'
+        - name: estado
+          in: query
+          description: Filtrar por estado del envío
+          schema:
+            $ref: '#/components/schemas/EstadoNotificacion'
+        - name: canal
+          in: query
+          description: Filtrar por canal de envío
+          schema:
+            $ref: '#/components/schemas/CanalNotificacion'
+        - name: fechaDesde
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: fechaHasta
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Historial paginado de notificaciones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedNotificacionDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /notificaciones/{id}:
+    get:
+      tags: [Notificaciones]
+      operationId: obtenerNotificacion
+      summary: Obtener detalle de una notificación
+      description: Retorna el detalle completo de una notificación, incluyendo historial de intentos y mensaje de error en caso de fallo.
+      parameters:
+        - $ref: '#/components/parameters/NotificacionId'
+      responses:
+        '200':
+          description: Detalle de la notificación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificacionDetalleDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /notificaciones/{id}/reintentar:
+    post:
+      tags: [Administración]
+      operationId: reintentarNotificacion
+      summary: Reintentar el envío de una notificación fallida
+      description: |
+        Fuerza el reintento de una notificación en estado FALLIDA.
+        Solo disponible si el número de intentos no ha superado el máximo configurado.
+        Requiere rol de administrador.
+      parameters:
+        - $ref: '#/components/parameters/NotificacionId'
+      responses:
+        '202':
+          description: Reintento encolado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificacionDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: La notificación no está en estado FALLIDA o superó el máximo de reintentos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDTO'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /notificaciones/fallidas/reintentar-lote:
+    post:
+      tags: [Administración]
+      operationId: reintentarLoteFallidas
+      summary: Reintentar en lote las notificaciones fallidas pendientes
+      description: |
+        Dispara manualmente el procesamiento de todas las notificaciones FALLIDAS
+        con intentos < maxIntentos. Normalmente ejecutado por el scheduler automático.
+        Requiere rol de administrador.
+      responses:
+        '202':
+          description: Lote de reintentos encolado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReintentarLoteResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /plantillas:
+    get:
+      tags: [Administración]
+      operationId: listarPlantillas
+      summary: Listar plantillas de notificación
+      description: Retorna el catálogo de plantillas de email/SMS activas e inactivas.
+      parameters:
+        - name: tipo
+          in: query
+          schema:
+            $ref: '#/components/schemas/TipoNotificacion'
+        - name: canal
+          in: query
+          schema:
+            $ref: '#/components/schemas/CanalNotificacion'
+        - name: activa
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Listado de plantillas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlantillaDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /plantillas/{codigo}/preview:
+    post:
+      tags: [Administración]
+      operationId: previewPlantilla
+      summary: Previsualizar una plantilla con datos de prueba
+      description: Renderiza la plantilla con las variables proporcionadas para validar el resultado antes de activar.
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          description: Código único de la plantilla
+          schema:
+            type: string
+            example: "CITA_AGENDADA_EMAIL"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewPlantillaRequest'
+            example:
+              variables:
+                pacienteNombre: "Juan Pérez"
+                medicoNombre: "Dr. García"
+                fechaCita: "25/06/2026 09:00"
+                tipoCita: "Consulta Médica"
+      responses:
+        '200':
+          description: Resultado del renderizado de la plantilla
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewPlantillaResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      tags: [Administración]
+      operationId: healthCheck
+      summary: Estado del servicio
+      description: Endpoint de health check que verifica conectividad con SMTP, Service Bus y base de datos.
+      security: []
+      responses:
+        '200':
+          description: Servicio operativo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDTO'
+        '503':
+          description: Servicio degradado o no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDTO'
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT emitido por Microsoft Entra ID (OAuth2 / OpenID Connect)
+
+  parameters:
+    NotificacionId:
+      name: id
+      in: path
+      required: true
+      description: Identificador único de la notificación (UUID)
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+
+    TipoNotificacion:
+      type: string
+      enum:
+        - CITA_AGENDADA
+        - CITA_CANCELADA
+        - CITA_REAGENDADA
+        - CONSULTA_CANCELADA
+        - EXAMEN_COMPLETADO
+        - DIAGNOSTICO_REGISTRADO
+      description: Tipo de evento que origina la notificación
+
+    EstadoNotificacion:
+      type: string
+      enum:
+        - PENDIENTE
+        - ENVIADA
+        - FALLIDA
+        - REINTENTANDO
+      description: Estado del envío de la notificación
+
+    CanalNotificacion:
+      type: string
+      enum:
+        - EMAIL
+        - SMS
+        - PUSH
+      description: Canal de envío utilizado
+
+    NotificacionDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "990e8400-e29b-41d4-a716-446655440005"
+        pacienteId:
+          type: string
+          example: "12345678"
+        destinatario:
+          type: string
+          description: Email o número de teléfono del destinatario
+          example: "juan.perez@email.com"
+        asunto:
+          type: string
+          example: "Su cita médica ha sido confirmada"
+        tipo:
+          $ref: '#/components/schemas/TipoNotificacion'
+        canal:
+          $ref: '#/components/schemas/CanalNotificacion'
+        estado:
+          $ref: '#/components/schemas/EstadoNotificacion'
+        intentos:
+          type: integer
+          description: Número de intentos de envío realizados
+          example: 1
+        maxIntentos:
+          type: integer
+          description: Máximo de reintentos permitidos
+          example: 3
+        fechaEnvio:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-06-25T09:05:00"
+        fechaCreacion:
+          type: string
+          format: date-time
+          example: "2026-06-25T09:00:30"
+
+    NotificacionDetalleDTO:
+      allOf:
+        - $ref: '#/components/schemas/NotificacionDTO'
+        - type: object
+          properties:
+            cuerpo:
+              type: string
+              description: Contenido completo del mensaje enviado
+              example: "<html>...</html>"
+            destinatarioSecundario:
+              type: string
+              description: Email o número CC / secundario
+              nullable: true
+            errorMensaje:
+              type: string
+              description: Descripción del error en caso de fallo
+              nullable: true
+              example: "Connection timeout al servidor SMTP"
+            historialIntentos:
+              type: array
+              items:
+                $ref: '#/components/schemas/IntentoNotificacionDTO'
+
+    IntentoNotificacionDTO:
+      type: object
+      properties:
+        numeroIntento:
+          type: integer
+          example: 1
+        fechaIntento:
+          type: string
+          format: date-time
+        exitoso:
+          type: boolean
+        errorDetalle:
+          type: string
+          nullable: true
+
+    PagedNotificacionDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificacionDTO'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        last:
+          type: boolean
+
+    ReintentarLoteResponse:
+      type: object
+      properties:
+        totalEncontradas:
+          type: integer
+          description: Notificaciones fallidas encontradas para reintento
+          example: 5
+        totalEncoladas:
+          type: integer
+          description: Notificaciones encoladas para reintento
+          example: 5
+        timestamp:
+          type: string
+          format: date-time
+
+    PlantillaDTO:
+      type: object
+      properties:
+        codigo:
+          type: string
+          example: "CITA_AGENDADA_EMAIL"
+        tipo:
+          $ref: '#/components/schemas/TipoNotificacion'
+        canal:
+          $ref: '#/components/schemas/CanalNotificacion'
+        asuntoTemplate:
+          type: string
+          example: "HEPAQ - Su cita ha sido agendada para el {{fechaCita}}"
+        idioma:
+          type: string
+          example: "es"
+        activa:
+          type: boolean
+          example: true
+        variablesRequeridas:
+          type: array
+          description: Variables que debe proveer el evento para renderizar la plantilla
+          items:
+            type: string
+          example:
+            - "pacienteNombre"
+            - "medicoNombre"
+            - "fechaCita"
+            - "tipoCita"
+
+    PreviewPlantillaRequest:
+      type: object
+      required:
+        - variables
+      properties:
+        variables:
+          type: object
+          description: Mapa de variables clave-valor para renderizar la plantilla
+          additionalProperties:
+            type: string
+          example:
+            pacienteNombre: "Juan Pérez"
+            medicoNombre: "Dr. García"
+            fechaCita: "25/06/2026 09:00"
+
+    PreviewPlantillaResponse:
+      type: object
+      properties:
+        asuntoRenderizado:
+          type: string
+          example: "HEPAQ - Su cita ha sido agendada para el 25/06/2026 09:00"
+        cuerpoHtml:
+          type: string
+          description: HTML renderizado de la plantilla
+        cuerpoTexto:
+          type: string
+          description: Versión en texto plano (fallback para clientes sin soporte HTML)
+
+    HealthDTO:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - UP
+            - DOWN
+            - DEGRADED
+          example: "UP"
+        timestamp:
+          type: string
+          format: date-time
+        components:
+          type: object
+          properties:
+            smtp:
+              $ref: '#/components/schemas/HealthComponentDTO'
+            serviceBus:
+              $ref: '#/components/schemas/HealthComponentDTO'
+            database:
+              $ref: '#/components/schemas/HealthComponentDTO'
+
+    HealthComponentDTO:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN]
+        latencyMs:
+          type: integer
+          description: Latencia de la última verificación en milisegundos
+          example: 12
+        error:
+          type: string
+          nullable: true
+
+    ErrorDTO:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        traceId:
+          type: string
+
+    ValidationErrorDTO:
+      allOf:
+        - $ref: '#/components/schemas/ErrorDTO'
+        - type: object
+          properties:
+            fieldErrors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+
+  responses:
+    BadRequest:
+      description: Solicitud inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorDTO'
+
+    Unauthorized:
+      description: Token JWT ausente, expirado o inválido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    Forbidden:
+      description: Sin permisos para esta operación — se requiere rol administrativo
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    InternalServerError:
+      description: Error interno del servidor
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'

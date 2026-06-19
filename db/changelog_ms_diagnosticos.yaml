@@ -1,0 +1,236 @@
+databaseChangeLog:
+
+  # ================================================
+  # CHANGESET 001 — Tabla principal: diagnosticos
+  # ================================================
+  - changeSet:
+      id: "001-create-table-diagnosticos"
+      author: "hepaq"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: diagnosticos
+      changes:
+        - createTable:
+            tableName: diagnosticos
+            remarks: "Tabla de diagnósticos médicos — Write Model (Commands)"
+            columns:
+              - column:
+                  name: id
+                  type: uniqueidentifier
+                  remarks: "Identificador único UUID del diagnóstico"
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: paciente_id
+                  type: varchar(20)
+                  remarks: "DNI o código del paciente"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: medico_id
+                  type: varchar(50)
+                  remarks: "Código del médico que emite el diagnóstico"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: consulta_id
+                  type: uniqueidentifier
+                  remarks: "Consulta médica asociada al diagnóstico"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: codigo_cie
+                  type: varchar(10)
+                  remarks: "Código del catálogo CIE-10 (ej. I10, J45.0, E11)"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: descripcion
+                  type: nvarchar(500)
+                  remarks: "Descripción libre del diagnóstico (complementa el código CIE)"
+              - column:
+                  name: tipo
+                  type: varchar(20)
+                  remarks: "PRESUNTIVO | DEFINITIVO | DIFERENCIAL | SECUNDARIO"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: estado
+                  type: varchar(20)
+                  defaultValue: "ACTIVO"
+                  remarks: "ACTIVO | RESUELTO | CRONICO | ELIMINADO"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: notas_medicas
+                  type: nvarchar(max)
+                  remarks: "Notas clínicas adicionales del médico"
+              - column:
+                  name: tratamiento_sugerido
+                  type: nvarchar(max)
+                  remarks: "Plan de tratamiento sugerido para este diagnóstico"
+              - column:
+                  name: motivo_eliminacion
+                  type: nvarchar(500)
+                  remarks: "Motivo del soft delete"
+              - column:
+                  name: fecha_registro
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fecha_actualizacion
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: eliminado_por
+                  type: varchar(100)
+                  remarks: "Usuario que realizó la eliminación lógica"
+              - column:
+                  name: version
+                  type: int
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  # ================================================
+  # CHANGESET 002 — Índices de rendimiento
+  # ================================================
+  - changeSet:
+      id: "002-indexes-diagnosticos"
+      author: "hepaq"
+      changes:
+        - createIndex:
+            indexName: idx_diagnosticos_paciente_id
+            tableName: diagnosticos
+            columns:
+              - column:
+                  name: paciente_id
+
+        - createIndex:
+            indexName: idx_diagnosticos_consulta_id
+            tableName: diagnosticos
+            columns:
+              - column:
+                  name: consulta_id
+
+        - createIndex:
+            indexName: idx_diagnosticos_codigo_cie
+            tableName: diagnosticos
+            columns:
+              - column:
+                  name: codigo_cie
+
+        - createIndex:
+            indexName: idx_diagnosticos_estado
+            tableName: diagnosticos
+            columns:
+              - column:
+                  name: estado
+
+        # Historia de diagnósticos activos de un paciente
+        - createIndex:
+            indexName: idx_diagnosticos_paciente_estado
+            tableName: diagnosticos
+            columns:
+              - column:
+                  name: paciente_id
+              - column:
+                  name: estado
+              - column:
+                  name: fecha_registro
+                  descending: true
+
+        # Diagnósticos por consulta y tipo
+        - createIndex:
+            indexName: idx_diagnosticos_consulta_tipo
+            tableName: diagnosticos
+            columns:
+              - column:
+                  name: consulta_id
+              - column:
+                  name: tipo
+
+  # ================================================
+  # CHANGESET 003 — Constraints de dominio
+  # ================================================
+  - changeSet:
+      id: "003-constraints-diagnosticos"
+      author: "hepaq"
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE diagnosticos
+              ADD CONSTRAINT chk_diagnosticos_tipo
+              CHECK (tipo IN ('PRESUNTIVO', 'DEFINITIVO', 'DIFERENCIAL', 'SECUNDARIO'));
+
+        - sql:
+            sql: |
+              ALTER TABLE diagnosticos
+              ADD CONSTRAINT chk_diagnosticos_estado
+              CHECK (estado IN ('ACTIVO', 'RESUELTO', 'CRONICO', 'ELIMINADO'));
+
+        # Validar formato básico del código CIE (letra + dígitos)
+        - sql:
+            sql: |
+              ALTER TABLE diagnosticos
+              ADD CONSTRAINT chk_diagnosticos_codigo_cie
+              CHECK (codigo_cie LIKE '[A-Z][0-9]%');
+
+  # ================================================
+  # CHANGESET 004 — Tabla de auditoría
+  # ================================================
+  - changeSet:
+      id: "004-create-table-diagnosticos-auditoria"
+      author: "hepaq"
+      changes:
+        - createTable:
+            tableName: diagnosticos_auditoria
+            remarks: "Historial de cambios de estado de diagnósticos"
+            columns:
+              - column:
+                  name: id
+                  type: uniqueidentifier
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: diagnostico_id
+                  type: uniqueidentifier
+                  constraints:
+                    nullable: false
+              - column:
+                  name: estado_anterior
+                  type: varchar(20)
+              - column:
+                  name: estado_nuevo
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: accion
+                  type: varchar(50)
+                  remarks: "INSERT | UPDATE_ESTADO | SOFT_DELETE"
+              - column:
+                  name: usuario_id
+                  type: varchar(100)
+              - column:
+                  name: timestamp
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+
+        - addForeignKeyConstraint:
+            baseTableName: diagnosticos_auditoria
+            baseColumnNames: diagnostico_id
+            constraintName: fk_diag_auditoria_diagnostico_id
+            referencedTableName: diagnosticos
+            referencedColumnNames: id
+            onDelete: CASCADE

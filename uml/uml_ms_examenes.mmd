@@ -1,0 +1,428 @@
+---
+title: HEPAQ - MS Exámenes (C4 Nivel 4 - Class Diagram)
+---
+classDiagram
+
+    %% =====================
+    %% ENUMS
+    %% =====================
+
+    class TipoExamen {
+        <<enumeration>>
+        LABORATORIO
+        IMAGEN
+        ECOGRAFIA
+        RAYOS_X
+        TOMOGRAFIA
+        RESONANCIA
+    }
+
+    class EstadoExamen {
+        <<enumeration>>
+        PENDIENTE
+        EN_PROCESO
+        COMPLETADO
+        CANCELADO
+        ELIMINADO
+    }
+
+    %% =====================
+    %% DOMAIN
+    %% =====================
+
+    class Examen {
+        +UUID id
+        +String pacienteId
+        +String medicoId
+        +UUID consultaId
+        +TipoExamen tipo
+        +EstadoExamen estado
+        +String descripcion
+        +String indicacionesPrevias
+        +String resultados
+        +String interpretacion
+        +LocalDateTime fechaSolicitud
+        +LocalDateTime fechaResultado
+        +LocalDateTime fechaCreacion
+        +iniciarProceso() void
+        +completar(resultados String) void
+        +cancelar(motivo String) void
+        +eliminar() void
+        +estaCompletado() boolean
+        +tienAdjuntos() boolean
+    }
+
+    class AdjuntoExamen {
+        +UUID id
+        +UUID examenId
+        +String nombreArchivo
+        +String urlBlob
+        +String contentType
+        +Long tamanioBytes
+        +LocalDateTime fechaSubida
+        +String subidoPor
+        +boolean esImagen() boolean
+        +String obtenerExtension() String
+        +boolean excedeTamanioMaximo() boolean
+    }
+
+    Examen "1" *-- "0..*" AdjuntoExamen
+    Examen --> TipoExamen
+    Examen --> EstadoExamen
+
+    %% =====================
+    %% PATTERN: STRATEGY
+    %% Cada tipo de examen tiene su propia lógica de validación
+    %% y procesamiento de resultados
+    %% =====================
+
+    class ExamenProcesadorStrategy {
+        <<interface>>
+        +validar(examen Examen) void
+        +procesar(examen Examen) Examen
+        +aceptaAdjuntos() boolean
+        +tamanioMaximoAdjunto() Long
+    }
+
+    class LaboratorioExamenStrategy {
+        +validar(examen Examen) void
+        +procesar(examen Examen) Examen
+        +aceptaAdjuntos() boolean
+        +tamanioMaximoAdjunto() Long
+        -validarParametrosLaboratorio(examen Examen) void
+        -normalizarResultados(resultados String) String
+    }
+
+    class ImagenExamenStrategy {
+        +validar(examen Examen) void
+        +procesar(examen Examen) Examen
+        +aceptaAdjuntos() boolean
+        +tamanioMaximoAdjunto() Long
+        -validarFormatoImagen(adjunto AdjuntoExamen) void
+        -generarMiniatura(urlBlob String) String
+    }
+
+    class EcografiaExamenStrategy {
+        +validar(examen Examen) void
+        +procesar(examen Examen) Examen
+        +aceptaAdjuntos() boolean
+        +tamanioMaximoAdjunto() Long
+        -validarDuracion(adjunto AdjuntoExamen) void
+    }
+
+    ExamenProcesadorStrategy <|.. LaboratorioExamenStrategy
+    ExamenProcesadorStrategy <|.. ImagenExamenStrategy
+    ExamenProcesadorStrategy <|.. EcografiaExamenStrategy
+
+    %% =====================
+    %% PATTERN: FACTORY METHOD
+    %% =====================
+
+    class ExamenStrategyFactory {
+        -strategies Map~TipoExamen_ExamenProcesadorStrategy~
+        +obtener(tipo TipoExamen) ExamenProcesadorStrategy
+        -registrar(tipo TipoExamen, strategy ExamenProcesadorStrategy) void
+    }
+
+    ExamenStrategyFactory --> ExamenProcesadorStrategy
+
+    %% =====================
+    %% APPLICATION - USE CASES
+    %% =====================
+
+    class RegistrarExamenUseCase {
+        -examenRepository ExamenRepositoryPort
+        -blobStorage BlobStoragePort
+        -eventPublisher EventPublisherPort
+        -strategyFactory ExamenStrategyFactory
+        +ejecutar(cmd RegistrarExamenCommand) Examen
+        -construirExamen(cmd RegistrarExamenCommand) Examen
+        -subirAdjuntos(cmd RegistrarExamenCommand, examen Examen) void
+    }
+
+    class CancelarExamenUseCase {
+        -examenRepository ExamenRepositoryPort
+        -eventPublisher EventPublisherPort
+        +ejecutar(cmd CancelarExamenCommand) void
+        -validarCancelable(examen Examen) void
+    }
+
+    class EditarExamenUseCase {
+        -examenRepository ExamenRepositoryPort
+        -blobStorage BlobStoragePort
+        -eventPublisher EventPublisherPort
+        -strategyFactory ExamenStrategyFactory
+        +ejecutar(cmd EditarExamenCommand) Examen
+        -aplicarCambios(examen Examen, cmd EditarExamenCommand) Examen
+        -actualizarAdjuntos(cmd EditarExamenCommand, examen Examen) void
+    }
+
+    class BorrarExamenUseCase {
+        -examenRepository ExamenRepositoryPort
+        -blobStorage BlobStoragePort
+        -eventPublisher EventPublisherPort
+        +ejecutar(cmd BorrarExamenCommand) void
+        -eliminarAdjuntosEnBlob(examen Examen) void
+        -validarEliminable(examen Examen) void
+    }
+
+    RegistrarExamenUseCase --> ExamenRepositoryPort
+    RegistrarExamenUseCase --> BlobStoragePort
+    RegistrarExamenUseCase --> EventPublisherPort
+    RegistrarExamenUseCase --> ExamenStrategyFactory
+    CancelarExamenUseCase --> ExamenRepositoryPort
+    CancelarExamenUseCase --> EventPublisherPort
+    EditarExamenUseCase --> ExamenRepositoryPort
+    EditarExamenUseCase --> BlobStoragePort
+    EditarExamenUseCase --> EventPublisherPort
+    EditarExamenUseCase --> ExamenStrategyFactory
+    BorrarExamenUseCase --> ExamenRepositoryPort
+    BorrarExamenUseCase --> BlobStoragePort
+    BorrarExamenUseCase --> EventPublisherPort
+
+    %% =====================
+    %% COMMANDS
+    %% =====================
+
+    class RegistrarExamenCommand {
+        +String pacienteId
+        +String medicoId
+        +UUID consultaId
+        +TipoExamen tipo
+        +String descripcion
+        +String indicacionesPrevias
+        +List~AdjuntoData~ adjuntos
+    }
+
+    class CancelarExamenCommand {
+        +UUID examenId
+        +String motivoCancelacion
+    }
+
+    class EditarExamenCommand {
+        +UUID examenId
+        +String resultados
+        +String interpretacion
+        +List~AdjuntoData~ adjuntosNuevos
+        +List~UUID~ adjuntosAEliminar
+    }
+
+    class BorrarExamenCommand {
+        +UUID examenId
+        +String motivoBorrado
+        +String solicitanteId
+    }
+
+    %% =====================
+    %% QUERY SERVICES
+    %% =====================
+
+    class ObtenerExamenQuery {
+        -examenCosmosAdapter ExamenCosmosAdapter
+        -examenRedisAdapter ExamenRedisAdapter
+        +ejecutar(id UUID) ExamenDTO
+        -buscarEnCache(id UUID) Optional~ExamenDTO~
+        -buscarEnCosmos(id UUID) ExamenDTO
+    }
+
+    class ListarExamenesQuery {
+        -examenCosmosAdapter ExamenCosmosAdapter
+        -examenRedisAdapter ExamenRedisAdapter
+        +ejecutar(pacienteId String) List~ExamenDTO~
+        +ejecutarPorConsulta(consultaId UUID) List~ExamenDTO~
+        +ejecutarPorTipo(pacienteId String, tipo TipoExamen) List~ExamenDTO~
+    }
+
+    class ObtenerAdjuntoQuery {
+        -blobStorageAdapter BlobStorageAdapter
+        +ejecutar(examenId UUID, adjuntoId UUID) AdjuntoDTO
+        +listarPorExamen(examenId UUID) List~AdjuntoDTO~
+        +generarUrlDescarga(adjuntoId UUID) String
+    }
+
+    ObtenerExamenQuery --> ExamenCosmosAdapter
+    ObtenerExamenQuery --> ExamenRedisAdapter
+    ListarExamenesQuery --> ExamenCosmosAdapter
+    ListarExamenesQuery --> ExamenRedisAdapter
+    ObtenerAdjuntoQuery --> BlobStorageAdapter
+
+    %% =====================
+    %% PORTS
+    %% =====================
+
+    class ExamenRepositoryPort {
+        <<interface>>
+        +guardar(examen Examen) Examen
+        +obtener(id UUID) Optional~Examen~
+        +actualizar(examen Examen) Examen
+        +eliminar(id UUID) void
+        +existePorConsulta(consultaId UUID) boolean
+    }
+
+    class ExamenReadRepositoryPort {
+        <<interface>>
+        +obtenerPorId(id UUID) Optional~ExamenDTO~
+        +listarPorPaciente(pacienteId String) List~ExamenDTO~
+        +listarPorConsulta(consultaId UUID) List~ExamenDTO~
+        +listarPorTipo(pacienteId String, tipo TipoExamen) List~ExamenDTO~
+    }
+
+    class ExamenCachePort {
+        <<interface>>
+        +obtener(id UUID) Optional~ExamenDTO~
+        +guardar(id UUID, dto ExamenDTO, ttl Duration) void
+        +invalidar(id UUID) void
+        +invalidarPorPaciente(pacienteId String) void
+    }
+
+    class BlobStoragePort {
+        <<interface>>
+        +subir(nombreArchivo String, datos byte[], contentType String) String
+        +obtener(url String) byte[]
+        +eliminar(url String) void
+        +generarUrlFirmada(url String, expiracion Duration) String
+    }
+
+    class EventPublisherPort {
+        <<interface>>
+        +publish(event DomainEvent) void
+    }
+
+    %% =====================
+    %% ADAPTERS
+    %% =====================
+
+    class ExamenJpaAdapter {
+        -repository ExamenJpaRepository
+        -mapper ExamenMapper
+        +guardar(examen Examen) Examen
+        +obtener(id UUID) Optional~Examen~
+        +actualizar(examen Examen) Examen
+        +eliminar(id UUID) void
+        +existePorConsulta(consultaId UUID) boolean
+    }
+
+    class ExamenCosmosAdapter {
+        -repository ExamenCosmosRepository
+        -mapper ExamenMapper
+        +obtenerPorId(id UUID) Optional~ExamenDTO~
+        +listarPorPaciente(pacienteId String) List~ExamenDTO~
+        +listarPorConsulta(consultaId UUID) List~ExamenDTO~
+        +listarPorTipo(pacienteId String, tipo TipoExamen) List~ExamenDTO~
+        +guardar(dto ExamenDTO) void
+        +actualizar(dto ExamenDTO) void
+    }
+
+    class ExamenRedisAdapter {
+        -repository ExamenRedisRepository
+        -defaultTtl Duration
+        +obtener(id UUID) Optional~ExamenDTO~
+        +guardar(id UUID, dto ExamenDTO, ttl Duration) void
+        +invalidar(id UUID) void
+        +invalidarPorPaciente(pacienteId String) void
+    }
+
+    class BlobStorageAdapter {
+        -blobServiceClient BlobServiceClient
+        -containerName String
+        +subir(nombreArchivo String, datos byte[], contentType String) String
+        +obtener(url String) byte[]
+        +eliminar(url String) void
+        +generarUrlFirmada(url String, expiracion Duration) String
+        -construirRuta(nombreArchivo String) String
+    }
+
+    class ServiceBusPublisherAdapter {
+        -senderClient ServiceBusSenderClient
+        -topicName String
+        +publish(event DomainEvent) void
+        -serializar(event DomainEvent) String
+    }
+
+    ExamenRepositoryPort <|.. ExamenJpaAdapter
+    ExamenReadRepositoryPort <|.. ExamenCosmosAdapter
+    ExamenCachePort <|.. ExamenRedisAdapter
+    BlobStoragePort <|.. BlobStorageAdapter
+    EventPublisherPort <|.. ServiceBusPublisherAdapter
+
+    %% =====================
+    %% EVENT CONSUMERS
+    %% =====================
+
+    class RegistrarExamenConsumer {
+        -registrarUseCase RegistrarExamenUseCase
+        -objectMapper ObjectMapper
+        +consume(message ServiceBusReceivedMessage) void
+        -deserializar(payload String) RegistrarExamenCommand
+    }
+
+    class CancelarExamenConsumer {
+        -cancelarUseCase CancelarExamenUseCase
+        -objectMapper ObjectMapper
+        +consume(message ServiceBusReceivedMessage) void
+        -deserializar(payload String) CancelarExamenCommand
+    }
+
+    class BorrarExamenConsumer {
+        -borrarUseCase BorrarExamenUseCase
+        -objectMapper ObjectMapper
+        +consume(message ServiceBusReceivedMessage) void
+        -deserializar(payload String) BorrarExamenCommand
+    }
+
+    RegistrarExamenConsumer --> RegistrarExamenUseCase
+    CancelarExamenConsumer --> CancelarExamenUseCase
+    BorrarExamenConsumer --> BorrarExamenUseCase
+
+    %% =====================
+    %% REST LAYER
+    %% =====================
+
+    class ExamenesController {
+        -delegate ExamenDelegate
+        +editarExamen(id UUID, request EditarExamenRequest) ResponseEntity~ExamenDTO~
+        +obtenerExamen(id UUID) ResponseEntity~ExamenDTO~
+        +listarExamenes(pacienteId String) ResponseEntity~List~ExamenDTO~~
+        +obtenerAdjunto(examenId UUID, adjuntoId UUID) ResponseEntity~byte[]~
+        +listarAdjuntos(examenId UUID) ResponseEntity~List~AdjuntoDTO~~
+    }
+
+    class ExamenDelegate {
+        -editarUseCase EditarExamenUseCase
+        -obtenerQuery ObtenerExamenQuery
+        -listarQuery ListarExamenesQuery
+        -obtenerAdjuntoQuery ObtenerAdjuntoQuery
+        -mapper ExamenMapper
+        +editar(id UUID, request EditarExamenRequest) ExamenDTO
+        +obtener(id UUID) ExamenDTO
+        +listar(pacienteId String) List~ExamenDTO~
+        +obtenerAdjunto(examenId UUID, adjuntoId UUID) AdjuntoDTO
+        +listarAdjuntos(examenId UUID) List~AdjuntoDTO~
+    }
+
+    class ExamenMapper {
+        +toDTO(examen Examen) ExamenDTO
+        +toDomain(command RegistrarExamenCommand) Examen
+        +toEntity(examen Examen) ExamenEntity
+        +toDomainFromEntity(entity ExamenEntity) Examen
+        +adjuntoToDTO(adjunto AdjuntoExamen) AdjuntoDTO
+    }
+
+    class ExamenEventPublisher {
+        -eventPublisher EventPublisherPort
+        +publicarExamenRegistrado(examen Examen) void
+        +publicarExamenCancelado(examen Examen) void
+        +publicarExamenEditado(examen Examen) void
+        +publicarExamenEliminado(examen Examen) void
+    }
+
+    ExamenesController --> ExamenDelegate
+    ExamenDelegate --> EditarExamenUseCase
+    ExamenDelegate --> ObtenerExamenQuery
+    ExamenDelegate --> ListarExamenesQuery
+    ExamenDelegate --> ObtenerAdjuntoQuery
+    ExamenDelegate --> ExamenMapper
+    ExamenEventPublisher --> EventPublisherPort
+    ExamenJpaAdapter --> ExamenMapper
+    ExamenCosmosAdapter --> ExamenMapper
+    BlobStorageAdapter --> AdjuntoExamen

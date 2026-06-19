@@ -1,0 +1,141 @@
+@startuml
+
+skinparam classAttributeIconSize 0
+
+package "Domain" {
+
+    enum TipoConsulta {
+        PRIMERA_VEZ
+        CONTROL
+        SEGUIMIENTO
+        EMERGENCIA
+    }
+
+    enum EstadoConsulta {
+        PENDIENTE
+        EN_CURSO
+        COMPLETADA
+        CANCELADA
+    }
+
+    class Consulta {
+        +id : UUID
+        +pacienteId : String
+        +medicoId : String
+        +citaId : UUID
+        +fechaHora : LocalDateTime
+        +tipo : TipoConsulta
+        +estado : EstadoConsulta
+        +motivoConsulta : String
+        +observaciones : String
+    }
+
+}
+
+package "Application" {
+
+    ' ---------------------------------
+    ' Pattern: Template Method
+    ' Define el esqueleto del flujo: validar → persistir → publicar evento
+    ' Las subclases implementan cada paso
+    ' ---------------------------------
+
+    abstract class ConsultaUseCaseTemplate {
+        +ejecutar(cmd)
+        #validar(cmd)
+        #{abstract} persistir(consulta : Consulta)
+        #{abstract} publicarEvento(consulta : Consulta)
+    }
+
+    class RegistrarConsultaUseCase {
+        #persistir(consulta : Consulta)
+        #publicarEvento(consulta : Consulta)
+    }
+
+    class EditarConsultaUseCase {
+        #persistir(consulta : Consulta)
+        #publicarEvento(consulta : Consulta)
+    }
+
+    class CancelarConsultaUseCase {
+        #persistir(consulta : Consulta)
+        #publicarEvento(consulta : Consulta)
+    }
+
+    ConsultaUseCaseTemplate <|-- RegistrarConsultaUseCase
+    ConsultaUseCaseTemplate <|-- EditarConsultaUseCase
+    ConsultaUseCaseTemplate <|-- CancelarConsultaUseCase
+
+}
+
+package "Ports" {
+
+    interface ConsultaRepositoryPort {
+        +guardar(consulta)
+        +obtener(id)
+        +actualizar(consulta)
+    }
+
+    interface CitaPort {
+        +obtenerCita(citaId)
+    }
+
+    interface MedicoPort {
+        +obtenerMedico(medicoId)
+    }
+
+    interface EventPublisherPort {
+        +publish(event)
+    }
+
+    interface ConsultaReadRepositoryPort {
+        +obtenerPorId(id)
+        +listar(filtros)
+    }
+
+    interface ConsultaCachePort {
+        +obtener(id)
+        +invalidar(id)
+    }
+
+}
+
+package "Adapters" {
+
+    class ConsultaJpaAdapter
+
+    class ConsultaCosmosAdapter
+
+    class ConsultaRedisAdapter
+
+    class CitaWebClientAdapter
+
+    class MedicoWebClientAdapter
+
+    class ServiceBusPublisherAdapter
+
+    ConsultaRepositoryPort <|.. ConsultaJpaAdapter
+
+    ConsultaReadRepositoryPort <|.. ConsultaCosmosAdapter
+
+    ConsultaCachePort <|.. ConsultaRedisAdapter
+
+    CitaPort <|.. CitaWebClientAdapter
+
+    MedicoPort <|.. MedicoWebClientAdapter
+
+    EventPublisherPort <|.. ServiceBusPublisherAdapter
+
+}
+
+ConsultaUseCaseTemplate --> ConsultaRepositoryPort
+ConsultaUseCaseTemplate --> EventPublisherPort
+
+RegistrarConsultaUseCase --> CitaPort
+RegistrarConsultaUseCase --> MedicoPort
+
+ConsultaJpaAdapter --> Consulta
+ConsultaCosmosAdapter --> Consulta
+ConsultaRedisAdapter --> Consulta
+
+@enduml

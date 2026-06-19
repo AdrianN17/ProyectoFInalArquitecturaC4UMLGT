@@ -1,0 +1,461 @@
+openapi: "3.0.3"
+
+info:
+  title: HEPAQ - MS Citas API
+  description: |
+    API REST para la gestión de citas médicas de la plataforma HEPAQ (EsSalud).
+    Permite agendar, reagendar y cancelar citas de tipo consulta médica, laboratorio y ecografía.
+    Integra validación de identidad (RENIEC), cobertura de seguro (EsSalud) y disponibilidad médica.
+  version: "1.0.0"
+  contact:
+    name: HEPAQ Dev Team
+    email: dev@hepaq.pe
+
+servers:
+  - url: https://api.hepaq.pe/citas/v1
+    description: Producción
+  - url: https://api-dev.hepaq.pe/citas/v1
+    description: Desarrollo / QA
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Citas
+    description: Operaciones de agendamiento, modificación y consulta de citas médicas
+
+paths:
+
+  /citas:
+    post:
+      tags: [Citas]
+      operationId: agendarCita
+      summary: Agendar una nueva cita médica
+      description: |
+        Registra una nueva cita médica para el paciente indicado.
+        Ejecuta la cadena de validaciones: identidad RENIEC → cobertura EsSalud → disponibilidad médica.
+        La estrategia de agendamiento varía según el tipo de cita (consulta, laboratorio, ecografía).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgendarCitaRequest'
+            example:
+              pacienteId: "12345678"
+              medicoId: "MED-001"
+              fechaHora: "2026-06-25T09:00:00"
+              tipo: "CONSULTA_MEDICA"
+              motivoCita: "Control de presión arterial"
+      responses:
+        '201':
+          description: Cita agendada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitaDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags: [Citas]
+      operationId: listarCitas
+      summary: Listar citas de un paciente
+      description: Retorna el listado paginado de citas filtradas por paciente, fecha, tipo y/o estado.
+      parameters:
+        - name: pacienteId
+          in: query
+          required: true
+          description: DNI o identificador del paciente
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 20
+        - name: fecha
+          in: query
+          description: Filtrar por fecha específica (formato YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+        - name: tipo
+          in: query
+          description: Filtrar por tipo de cita
+          schema:
+            $ref: '#/components/schemas/TipoCita'
+        - name: estado
+          in: query
+          description: Filtrar por estado de la cita
+          schema:
+            $ref: '#/components/schemas/EstadoCita'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Listado paginado de citas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedCitaDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /citas/{id}:
+    get:
+      tags: [Citas]
+      operationId: obtenerCita
+      summary: Obtener detalle de una cita
+      description: Retorna el detalle completo de una cita por su ID. Consulta primero en cache Redis, luego en Cosmos DB.
+      parameters:
+        - $ref: '#/components/parameters/CitaId'
+      responses:
+        '200':
+          description: Detalle de la cita
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitaDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /citas/{id}/reagendar:
+    put:
+      tags: [Citas]
+      operationId: reagendarCita
+      summary: Reagendar una cita existente
+      description: |
+        Modifica la fecha y hora de una cita en estado PENDIENTE o CONFIRMADA.
+        Re-ejecuta la validación de disponibilidad médica para la nueva fecha.
+      parameters:
+        - $ref: '#/components/parameters/CitaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReagendarCitaRequest'
+            example:
+              nuevaFechaHora: "2026-06-30T10:30:00"
+              motivoReagenda: "Conflicto de horario del paciente"
+      responses:
+        '200':
+          description: Cita reagendada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitaDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /citas/{id}/cancelar:
+    put:
+      tags: [Citas]
+      operationId: cancelarCita
+      summary: Cancelar una cita
+      description: Cancela una cita en estado PENDIENTE o CONFIRMADA. Publica el evento CitaCanceladaEvent al Service Bus.
+      parameters:
+        - $ref: '#/components/parameters/CitaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelarCitaRequest'
+            example:
+              motivoCancelacion: "Paciente no puede asistir por motivos de salud"
+      responses:
+        '204':
+          description: Cita cancelada exitosamente
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT emitido por Microsoft Entra ID (OAuth2 / OpenID Connect)
+
+  parameters:
+    CitaId:
+      name: id
+      in: path
+      required: true
+      description: Identificador único de la cita (UUID)
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+
+    TipoCita:
+      type: string
+      enum:
+        - CONSULTA_MEDICA
+        - LABORATORIO
+        - ECOGRAFIA
+      description: Tipo de cita médica
+
+    EstadoCita:
+      type: string
+      enum:
+        - PENDIENTE
+        - CONFIRMADA
+        - CANCELADA
+        - REPROGRAMADA
+      description: Estado actual de la cita
+
+    AgendarCitaRequest:
+      type: object
+      required:
+        - pacienteId
+        - medicoId
+        - fechaHora
+        - tipo
+      properties:
+        pacienteId:
+          type: string
+          minLength: 8
+          maxLength: 20
+          description: DNI o identificador del paciente (validado contra RENIEC)
+          example: "12345678"
+        medicoId:
+          type: string
+          description: Identificador del médico asignado
+          example: "MED-001"
+        fechaHora:
+          type: string
+          format: date-time
+          description: Fecha y hora deseada para la cita (ISO 8601)
+          example: "2026-06-25T09:00:00"
+        tipo:
+          $ref: '#/components/schemas/TipoCita'
+        motivoCita:
+          type: string
+          maxLength: 500
+          description: Descripción del motivo de la cita
+          example: "Control de presión arterial"
+
+    ReagendarCitaRequest:
+      type: object
+      required:
+        - nuevaFechaHora
+      properties:
+        nuevaFechaHora:
+          type: string
+          format: date-time
+          description: Nueva fecha y hora para la cita
+          example: "2026-06-30T10:30:00"
+        motivoReagenda:
+          type: string
+          maxLength: 500
+          description: Motivo por el que se reagenda la cita
+          example: "Conflicto de horario"
+
+    CancelarCitaRequest:
+      type: object
+      required:
+        - motivoCancelacion
+      properties:
+        motivoCancelacion:
+          type: string
+          minLength: 5
+          maxLength: 500
+          description: Motivo obligatorio de cancelación
+          example: "Paciente no puede asistir"
+
+    CitaDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único de la cita
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        pacienteId:
+          type: string
+          example: "12345678"
+        medicoId:
+          type: string
+          example: "MED-001"
+        fechaHora:
+          type: string
+          format: date-time
+          example: "2026-06-25T09:00:00"
+        tipo:
+          $ref: '#/components/schemas/TipoCita'
+        estado:
+          $ref: '#/components/schemas/EstadoCita'
+        motivoCita:
+          type: string
+          example: "Control de presión arterial"
+        fechaCreacion:
+          type: string
+          format: date-time
+          example: "2026-06-18T14:30:00"
+        fechaActualizacion:
+          type: string
+          format: date-time
+          example: "2026-06-18T14:30:00"
+
+    PagedCitaDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/CitaDTO'
+        page:
+          type: integer
+          example: 0
+        size:
+          type: integer
+          example: 20
+        totalElements:
+          type: integer
+          format: int64
+          example: 42
+        totalPages:
+          type: integer
+          example: 3
+        last:
+          type: boolean
+          example: false
+
+    ErrorDTO:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: "Bad Request"
+        message:
+          type: string
+          example: "El campo 'pacienteId' es obligatorio"
+        path:
+          type: string
+          example: "/citas"
+        traceId:
+          type: string
+          description: ID de correlación para trazabilidad distribuida
+          example: "abc123xyz"
+
+    ValidationErrorDTO:
+      allOf:
+        - $ref: '#/components/schemas/ErrorDTO'
+        - type: object
+          properties:
+            fieldErrors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                    example: "pacienteId"
+                  message:
+                    type: string
+                    example: "no debe estar vacío"
+
+  responses:
+    BadRequest:
+      description: Solicitud inválida — parámetros faltantes o con formato incorrecto
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorDTO'
+
+    Unauthorized:
+      description: Token JWT ausente, expirado o inválido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    Forbidden:
+      description: El usuario autenticado no tiene permisos sobre este recurso
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    NotFound:
+      description: El recurso solicitado no existe
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    Conflict:
+      description: Conflicto de estado — ej. el médico ya tiene una cita en esa fecha/hora
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    UnprocessableEntity:
+      description: La entidad no puede ser procesada — ej. cita ya cancelada, cobertura inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    InternalServerError:
+      description: Error interno del servidor
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'

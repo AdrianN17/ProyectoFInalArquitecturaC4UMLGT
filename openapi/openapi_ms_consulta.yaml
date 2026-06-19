@@ -1,0 +1,414 @@
+openapi: "3.0.3"
+
+info:
+  title: HEPAQ - MS Consultas API
+  description: |
+    API REST para la gestión de consultas médicas (atenciones) de la plataforma HEPAQ.
+    El registro de consultas se realiza vía Azure Service Bus (event-driven).
+    La API REST expone operaciones de edición, cancelación y consulta.
+    Implementa el patrón Template Method para el flujo: validar → persistir → publicar evento.
+  version: "1.0.0"
+  contact:
+    name: HEPAQ Dev Team
+    email: dev@hepaq.pe
+
+servers:
+  - url: https://api.hepaq.pe/consultas/v1
+    description: Producción
+  - url: https://api-dev.hepaq.pe/consultas/v1
+    description: Desarrollo / QA
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Consultas
+    description: Gestión de consultas médicas y atenciones clínicas
+
+paths:
+
+  /consultas:
+    get:
+      tags: [Consultas]
+      operationId: listarConsultas
+      summary: Listar consultas de un paciente
+      description: |
+        Retorna el listado paginado de consultas médicas.
+        Consulta primero en cache Redis; en cache miss, fallback a Cosmos DB (Read Model).
+      parameters:
+        - name: pacienteId
+          in: query
+          required: false
+          description: Filtrar por identificador del paciente
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 20
+        - name: medicoId
+          in: query
+          description: Filtrar por identificador del médico
+          schema:
+            type: string
+        - name: tipo
+          in: query
+          schema:
+            $ref: '#/components/schemas/TipoConsulta'
+        - name: estado
+          in: query
+          schema:
+            $ref: '#/components/schemas/EstadoConsulta'
+        - name: fechaDesde
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: fechaHasta
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Listado paginado de consultas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedConsultaDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /consultas/{id}:
+    get:
+      tags: [Consultas]
+      operationId: obtenerConsulta
+      summary: Obtener detalle de una consulta médica
+      description: Retorna el detalle completo de una consulta. Prioriza cache Redis, luego Cosmos DB.
+      parameters:
+        - $ref: '#/components/parameters/ConsultaId'
+      responses:
+        '200':
+          description: Detalle de la consulta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsultaDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [Consultas]
+      operationId: editarConsulta
+      summary: Editar una consulta médica
+      description: |
+        Actualiza los datos clínicos de una consulta en estado EN_CURSO o COMPLETADA.
+        Permite registrar anamnesis, examen físico, observaciones y tratamiento.
+        Publica el evento ConsultaEditadaEvent al Service Bus.
+      parameters:
+        - $ref: '#/components/parameters/ConsultaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditarConsultaRequest'
+            example:
+              anamnesis: "Paciente refiere dolor de cabeza desde hace 3 días"
+              examenFisico: "PA 130/85, FC 78 lpm, temperatura 36.8°C"
+              observaciones: "Probable hipertensión leve"
+              tratamiento: "Enalapril 5mg, 1 tableta al día por 30 días"
+      responses:
+        '200':
+          description: Consulta editada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsultaDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /consultas/{id}/cancelar:
+    put:
+      tags: [Consultas]
+      operationId: cancelarConsulta
+      summary: Cancelar una consulta médica
+      description: |
+        Cancela una consulta en estado PENDIENTE o EN_CURSO.
+        Publica el evento ConsultaCanceladaEvent al Service Bus para notificación al paciente.
+      parameters:
+        - $ref: '#/components/parameters/ConsultaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelarConsultaRequest'
+            example:
+              motivoCancelacion: "Médico no disponible por emergencia"
+      responses:
+        '204':
+          description: Consulta cancelada exitosamente
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT emitido por Microsoft Entra ID (OAuth2 / OpenID Connect)
+
+  parameters:
+    ConsultaId:
+      name: id
+      in: path
+      required: true
+      description: Identificador único de la consulta (UUID)
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+
+    TipoConsulta:
+      type: string
+      enum:
+        - PRIMERA_VEZ
+        - CONTROL
+        - SEGUIMIENTO
+        - EMERGENCIA
+      description: Tipo de consulta médica
+
+    EstadoConsulta:
+      type: string
+      enum:
+        - PENDIENTE
+        - EN_CURSO
+        - COMPLETADA
+        - CANCELADA
+      description: Estado actual de la consulta
+
+    EditarConsultaRequest:
+      type: object
+      properties:
+        anamnesis:
+          type: string
+          maxLength: 2000
+          description: Descripción de síntomas y antecedentes referidos por el paciente
+          example: "Paciente refiere dolor de cabeza desde hace 3 días"
+        examenFisico:
+          type: string
+          maxLength: 2000
+          description: Hallazgos del examen físico realizado por el médico
+          example: "PA 130/85, FC 78 lpm, temperatura 36.8°C"
+        observaciones:
+          type: string
+          maxLength: 2000
+          description: Observaciones clínicas del médico
+          example: "Probable hipertensión leve"
+        tratamiento:
+          type: string
+          maxLength: 2000
+          description: Plan de tratamiento indicado
+          example: "Enalapril 5mg, 1 tableta al día por 30 días"
+
+    CancelarConsultaRequest:
+      type: object
+      required:
+        - motivoCancelacion
+      properties:
+        motivoCancelacion:
+          type: string
+          minLength: 5
+          maxLength: 500
+          description: Motivo obligatorio de la cancelación
+          example: "Médico no disponible por emergencia"
+
+    ConsultaDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        pacienteId:
+          type: string
+          example: "12345678"
+        medicoId:
+          type: string
+          example: "MED-001"
+        citaId:
+          type: string
+          format: uuid
+          description: Referencia a la cita médica que originó esta consulta
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        fechaHora:
+          type: string
+          format: date-time
+          example: "2026-06-25T09:00:00"
+        tipo:
+          $ref: '#/components/schemas/TipoConsulta'
+        estado:
+          $ref: '#/components/schemas/EstadoConsulta'
+        motivoConsulta:
+          type: string
+          example: "Control de presión arterial"
+        anamnesis:
+          type: string
+          example: "Paciente refiere cefalea frontal de 3 días de evolución"
+        examenFisico:
+          type: string
+          example: "PA 130/85, FC 78 lpm"
+        observaciones:
+          type: string
+          example: "Hipertensión arterial estadio I"
+        tratamiento:
+          type: string
+          example: "Enalapril 5mg c/24h"
+        fechaCreacion:
+          type: string
+          format: date-time
+        fechaActualizacion:
+          type: string
+          format: date-time
+
+    PagedConsultaDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConsultaDTO'
+        page:
+          type: integer
+          example: 0
+        size:
+          type: integer
+          example: 20
+        totalElements:
+          type: integer
+          format: int64
+          example: 15
+        totalPages:
+          type: integer
+          example: 1
+        last:
+          type: boolean
+          example: true
+
+    ErrorDTO:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        traceId:
+          type: string
+
+    ValidationErrorDTO:
+      allOf:
+        - $ref: '#/components/schemas/ErrorDTO'
+        - type: object
+          properties:
+            fieldErrors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+
+  responses:
+    BadRequest:
+      description: Solicitud inválida — parámetros faltantes o con formato incorrecto
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorDTO'
+
+    Unauthorized:
+      description: Token JWT ausente, expirado o inválido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    Forbidden:
+      description: El usuario no tiene permisos sobre este recurso
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    NotFound:
+      description: El recurso solicitado no existe
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    UnprocessableEntity:
+      description: Estado inválido para la operación — ej. consulta ya cancelada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    InternalServerError:
+      description: Error interno del servidor
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'

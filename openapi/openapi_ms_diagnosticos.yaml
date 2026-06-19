@@ -1,0 +1,518 @@
+openapi: "3.0.3"
+
+info:
+  title: HEPAQ - MS Diagnósticos API
+  description: |
+    API REST para la gestión de diagnósticos médicos de la plataforma HEPAQ.
+    Permite registrar y eliminar diagnósticos clínicos codificados con CIE-10.
+    Incluye endpoints de consulta del catálogo CIE-10 almacenado en Azure Table Storage.
+    Implementa el patrón Decorator para la capa de cache Redis (cache-aside transparente).
+  version: "1.0.0"
+  contact:
+    name: HEPAQ Dev Team
+    email: dev@hepaq.pe
+
+servers:
+  - url: https://api.hepaq.pe/diagnosticos/v1
+    description: Producción
+  - url: https://api-dev.hepaq.pe/diagnosticos/v1
+    description: Desarrollo / QA
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Diagnósticos
+    description: Registro y consulta de diagnósticos médicos
+  - name: Catálogo CIE-10
+    description: Consulta del catálogo internacional de enfermedades (CIE-10)
+
+paths:
+
+  /diagnosticos:
+    post:
+      tags: [Diagnósticos]
+      operationId: registrarDiagnostico
+      summary: Registrar un diagnóstico médico
+      description: |
+        Registra un nuevo diagnóstico para el paciente, codificado con CIE-10.
+        Valida que el código CIE exista en el catálogo antes de persistir.
+        Publica el evento DiagnosticoRegistradoEvent al Service Bus.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrarDiagnosticoRequest'
+            example:
+              pacienteId: "12345678"
+              medicoId: "MED-001"
+              consultaId: "550e8400-e29b-41d4-a716-446655440001"
+              codigoCIE: "I10"
+              descripcion: "Hipertensión esencial (primaria)"
+              tipo: "DEFINITIVO"
+              notasMedicas: "Paciente con antecedente familiar de HTA"
+              tratamientoSugerido: "Enalapril 5mg c/24h, dieta hiposódica"
+      responses:
+        '201':
+          description: Diagnóstico registrado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticoDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Código CIE-10 no encontrado en el catálogo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDTO'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags: [Diagnósticos]
+      operationId: listarDiagnosticos
+      summary: Listar diagnósticos
+      description: |
+        Retorna el listado paginado de diagnósticos.
+        Puede filtrarse por paciente, consulta, tipo y/o estado.
+        Consulta en cache Redis con fallback a Cosmos DB.
+      parameters:
+        - name: pacienteId
+          in: query
+          description: Filtrar por identificador del paciente
+          schema:
+            type: string
+        - name: consultaId
+          in: query
+          description: Filtrar por consulta asociada
+          schema:
+            type: string
+            format: uuid
+        - name: tipo
+          in: query
+          schema:
+            $ref: '#/components/schemas/TipoDiagnostico'
+        - name: estado
+          in: query
+          schema:
+            $ref: '#/components/schemas/EstadoDiagnostico'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Listado paginado de diagnósticos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedDiagnosticoDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /diagnosticos/{id}:
+    get:
+      tags: [Diagnósticos]
+      operationId: obtenerDiagnostico
+      summary: Obtener detalle de un diagnóstico
+      description: Retorna el detalle completo de un diagnóstico por su ID.
+      parameters:
+        - $ref: '#/components/parameters/DiagnosticoId'
+      responses:
+        '200':
+          description: Detalle del diagnóstico
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticoDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [Diagnósticos]
+      operationId: borrarDiagnostico
+      summary: Eliminar un diagnóstico
+      description: |
+        Marca el diagnóstico como ELIMINADO (soft delete).
+        Publica el evento DiagnosticoEliminadoEvent al Service Bus.
+        Solo médicos con rol autorizado pueden realizar esta operación.
+      parameters:
+        - $ref: '#/components/parameters/DiagnosticoId'
+      responses:
+        '204':
+          description: Diagnóstico eliminado exitosamente
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /cie:
+    get:
+      tags: [Catálogo CIE-10]
+      operationId: listarCIE
+      summary: Listar códigos del catálogo CIE-10
+      description: |
+        Retorna el listado de códigos CIE-10 almacenado en Azure Table Storage.
+        Soporta filtrado por categoría y búsqueda por descripción.
+        Los resultados se cachean localmente en el adaptador.
+      parameters:
+        - name: categoria
+          in: query
+          description: Filtrar por categoría CIE-10 (ej. "I" para enfermedades circulatorias)
+          schema:
+            type: string
+            maxLength: 5
+        - name: q
+          in: query
+          description: Búsqueda por texto en descripción
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 100
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        '200':
+          description: Listado de códigos CIE-10
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedCodigoCIEDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /cie/{codigo}:
+    get:
+      tags: [Catálogo CIE-10]
+      operationId: obtenerCIE
+      summary: Obtener un código CIE-10 por su código
+      description: Retorna el detalle de un código CIE-10 específico.
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          description: Código CIE-10 (ej. "I10", "J45", "E11")
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 8
+            example: "I10"
+      responses:
+        '200':
+          description: Detalle del código CIE-10
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodigoCIEDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    DiagnosticoId:
+      name: id
+      in: path
+      required: true
+      description: Identificador único del diagnóstico (UUID)
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+
+    TipoDiagnostico:
+      type: string
+      enum:
+        - PRESUNTIVO
+        - DEFINITIVO
+        - DIFERENCIAL
+        - SECUNDARIO
+      description: Clasificación clínica del diagnóstico
+
+    EstadoDiagnostico:
+      type: string
+      enum:
+        - ACTIVO
+        - RESUELTO
+        - CRONICO
+        - ELIMINADO
+      description: Estado actual del diagnóstico
+
+    RegistrarDiagnosticoRequest:
+      type: object
+      required:
+        - pacienteId
+        - medicoId
+        - consultaId
+        - codigoCIE
+        - tipo
+      properties:
+        pacienteId:
+          type: string
+          minLength: 8
+          maxLength: 20
+          example: "12345678"
+        medicoId:
+          type: string
+          example: "MED-001"
+        consultaId:
+          type: string
+          format: uuid
+          description: Consulta médica que genera este diagnóstico
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        codigoCIE:
+          type: string
+          minLength: 2
+          maxLength: 8
+          description: Código del catálogo CIE-10
+          example: "I10"
+        descripcion:
+          type: string
+          maxLength: 500
+          description: Descripción libre del diagnóstico (complementa el código CIE)
+          example: "Hipertensión esencial (primaria)"
+        tipo:
+          $ref: '#/components/schemas/TipoDiagnostico'
+        notasMedicas:
+          type: string
+          maxLength: 2000
+          example: "Paciente con antecedente familiar de HTA"
+        tratamientoSugerido:
+          type: string
+          maxLength: 2000
+          example: "Enalapril 5mg c/24h, dieta hiposódica"
+
+    DiagnosticoDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "660e8400-e29b-41d4-a716-446655440002"
+        pacienteId:
+          type: string
+          example: "12345678"
+        medicoId:
+          type: string
+          example: "MED-001"
+        consultaId:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        codigoCIE:
+          type: string
+          example: "I10"
+        descripcionCIE:
+          type: string
+          example: "Hipertensión esencial (primaria)"
+        descripcion:
+          type: string
+          example: "Hipertensión esencial diagnosticada"
+        tipo:
+          $ref: '#/components/schemas/TipoDiagnostico'
+        estado:
+          $ref: '#/components/schemas/EstadoDiagnostico'
+        notasMedicas:
+          type: string
+        tratamientoSugerido:
+          type: string
+        fechaRegistro:
+          type: string
+          format: date-time
+        fechaActualizacion:
+          type: string
+          format: date-time
+
+    PagedDiagnosticoDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiagnosticoDTO'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        last:
+          type: boolean
+
+    CodigoCIEDTO:
+      type: object
+      properties:
+        codigo:
+          type: string
+          example: "I10"
+        descripcion:
+          type: string
+          example: "Hipertensión esencial (primaria)"
+        categoria:
+          type: string
+          description: Categoría de enfermedades CIE-10
+          example: "I"
+        subcategoria:
+          type: string
+          example: "I10-I15"
+        codigoParent:
+          type: string
+          description: Código padre en la jerarquía CIE
+          example: "I"
+        esTerminal:
+          type: boolean
+          description: Indica si el código es un nodo hoja (sin subcódigos)
+          example: true
+
+    PagedCodigoCIEDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/CodigoCIEDTO'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        last:
+          type: boolean
+
+    ErrorDTO:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        traceId:
+          type: string
+
+    ValidationErrorDTO:
+      allOf:
+        - $ref: '#/components/schemas/ErrorDTO'
+        - type: object
+          properties:
+            fieldErrors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+
+  responses:
+    BadRequest:
+      description: Solicitud inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorDTO'
+
+    Unauthorized:
+      description: Token JWT ausente, expirado o inválido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    Forbidden:
+      description: Sin permisos para realizar esta operación
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    UnprocessableEntity:
+      description: Estado inválido para la operación
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    InternalServerError:
+      description: Error interno del servidor
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'

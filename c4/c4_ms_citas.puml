@@ -1,0 +1,161 @@
+@startuml
+
+skinparam classAttributeIconSize 0
+
+package "Domain" {
+
+    enum TipoCita {
+        CONSULTA_MEDICA
+        LABORATORIO
+        ECOGRAFIA
+    }
+
+    enum EstadoCita {
+        PENDIENTE
+        CONFIRMADA
+        CANCELADA
+        REPROGRAMADA
+    }
+
+    class Cita {
+        +id : UUID
+        +pacienteId : String
+        +medicoId : String
+        +fechaHora : LocalDateTime
+        +tipo : TipoCita
+        +estado : EstadoCita
+    }
+
+    interface AgendaStrategy {
+        +validar(cita : Cita)
+        +reservar(cita : Cita)
+    }
+
+    class ConsultaMedicaStrategy
+    class LaboratorioStrategy
+    class EcografiaStrategy
+
+    AgendaStrategy <|.. ConsultaMedicaStrategy
+    AgendaStrategy <|.. LaboratorioStrategy
+    AgendaStrategy <|.. EcografiaStrategy
+
+    ' ---------------------------------
+    ' Pattern: Chain of Responsibility
+    ' Cadena de validaciones previas al agendamiento
+    ' ---------------------------------
+
+    abstract class ValidacionCitaHandler {
+        #siguiente : ValidacionCitaHandler
+        +setNext(handler : ValidacionCitaHandler)
+        +{abstract} validar(cita : Cita)
+    }
+
+    class ReniecValidacionHandler {
+        +validar(cita : Cita)
+    }
+
+    class SeguroValidacionHandler {
+        +validar(cita : Cita)
+    }
+
+    class DisponibilidadMedicoHandler {
+        +validar(cita : Cita)
+    }
+
+    ValidacionCitaHandler <|-- ReniecValidacionHandler
+    ValidacionCitaHandler <|-- SeguroValidacionHandler
+    ValidacionCitaHandler <|-- DisponibilidadMedicoHandler
+    ValidacionCitaHandler --> ValidacionCitaHandler : siguiente
+
+}
+
+package "Application" {
+
+    class AgendarCitaUseCase {
+        +ejecutar(cmd)
+    }
+
+    class ReagendarCitaUseCase {
+        +ejecutar(cmd)
+    }
+
+    class CancelarCitaUseCase {
+        +ejecutar(cmd)
+    }
+
+    class AgendaStrategyFactory {
+        +obtener(tipo : TipoCita)
+    }
+
+    AgendarCitaUseCase --> AgendaStrategyFactory
+
+    AgendaStrategyFactory --> AgendaStrategy
+
+    AgendarCitaUseCase --> ValidacionCitaHandler
+}
+
+package "Ports" {
+
+    interface CitaRepositoryPort {
+        +guardar(cita)
+        +obtener(id)
+    }
+
+    interface SeguroPort {
+        +validarCobertura()
+    }
+
+    interface ReniecPort {
+        +validarIdentidad()
+    }
+
+    interface MedicoPort {
+        +obtenerDisponibilidad()
+    }
+
+    interface EventPublisherPort {
+        +publish(event)
+    }
+
+}
+
+package "Adapters" {
+
+    class CitaJpaAdapter
+
+    class SeguroAdapter
+
+    class ReniecAdapter
+
+    class MedicoAdapter
+
+    class ServiceBusPublisherAdapter
+
+    CitaRepositoryPort <|.. CitaJpaAdapter
+
+    SeguroPort <|.. SeguroAdapter
+
+    ReniecPort <|.. ReniecAdapter
+
+    MedicoPort <|.. MedicoAdapter
+
+    EventPublisherPort <|.. ServiceBusPublisherAdapter
+
+}
+
+AgendarCitaUseCase --> CitaRepositoryPort
+AgendarCitaUseCase --> EventPublisherPort
+
+ReagendarCitaUseCase --> CitaRepositoryPort
+CancelarCitaUseCase --> CitaRepositoryPort
+
+' Cada handler de la cadena usa su puerto correspondiente
+ReniecValidacionHandler --> ReniecPort
+SeguroValidacionHandler --> SeguroPort
+DisponibilidadMedicoHandler --> MedicoPort
+
+ConsultaMedicaStrategy --> MedicoPort
+LaboratorioStrategy --> MedicoPort
+EcografiaStrategy --> MedicoPort
+
+@enduml

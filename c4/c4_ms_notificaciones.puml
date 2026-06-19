@@ -1,0 +1,118 @@
+@startuml
+
+skinparam classAttributeIconSize 0
+
+package "Domain" {
+
+    enum TipoNotificacion {
+        CITA_AGENDADA
+        CITA_CANCELADA
+        CITA_REAGENDADA
+        CONSULTA_CANCELADA
+        EXAMEN_COMPLETADO
+        DIAGNOSTICO_REGISTRADO
+    }
+
+    enum EstadoNotificacion {
+        PENDIENTE
+        ENVIADA
+        FALLIDA
+    }
+
+    class Notificacion {
+        +id : UUID
+        +pacienteId : String
+        +destinatario : String
+        +asunto : String
+        +cuerpo : String
+        +tipo : TipoNotificacion
+        +estado : EstadoNotificacion
+        +fechaEnvio : LocalDateTime
+    }
+
+    interface NotificacionStrategy {
+        +enviar(notificacion : Notificacion)
+    }
+
+    class EmailNotificacionStrategy
+    class SmsNotificacionStrategy
+
+    ' ---------------------------------
+    ' Pattern: Composite
+    ' Permite enviar por múltiples canales (email + SMS)
+    ' como si fuera una única estrategia
+    ' ---------------------------------
+
+    class CompositeNotificacionStrategy {
+        -strategies : List<NotificacionStrategy>
+        +agregar(strategy : NotificacionStrategy)
+        +enviar(notificacion : Notificacion)
+    }
+
+    NotificacionStrategy <|.. EmailNotificacionStrategy
+    NotificacionStrategy <|.. SmsNotificacionStrategy
+    NotificacionStrategy <|.. CompositeNotificacionStrategy
+    CompositeNotificacionStrategy --> NotificacionStrategy : strategies
+
+}
+
+package "Application" {
+
+    class GenerarNotificacionUseCase {
+        +ejecutar(cmd)
+    }
+
+    class NotificacionStrategyFactory {
+        +obtener(tipo : TipoNotificacion)
+    }
+
+    GenerarNotificacionUseCase --> NotificacionStrategyFactory
+
+    NotificacionStrategyFactory --> NotificacionStrategy
+    NotificacionStrategyFactory --> CompositeNotificacionStrategy : crea
+
+}
+
+package "Ports" {
+
+    interface NotificacionRepositoryPort {
+        +guardar(notificacion)
+        +obtener(id)
+    }
+
+    interface NotificacionSenderPort {
+        +enviar(notificacion)
+    }
+
+    interface EmailTemplatePort {
+        +construir(tipo, datos)
+    }
+
+}
+
+package "Adapters" {
+
+    class NotificacionJpaAdapter
+
+    class JavaMailAdapter
+
+    class ThymeleafEmailTemplateAdapter
+
+    NotificacionRepositoryPort <|.. NotificacionJpaAdapter
+
+    NotificacionSenderPort <|.. JavaMailAdapter
+
+    EmailTemplatePort <|.. ThymeleafEmailTemplateAdapter
+
+}
+
+GenerarNotificacionUseCase --> NotificacionRepositoryPort
+GenerarNotificacionUseCase --> NotificacionSenderPort
+GenerarNotificacionUseCase --> EmailTemplatePort
+
+EmailNotificacionStrategy --> NotificacionSenderPort
+EmailNotificacionStrategy --> EmailTemplatePort
+
+NotificacionJpaAdapter --> Notificacion
+
+@enduml

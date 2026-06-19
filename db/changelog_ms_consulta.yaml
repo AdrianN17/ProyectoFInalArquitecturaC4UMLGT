@@ -1,0 +1,258 @@
+databaseChangeLog:
+
+  # ================================================
+  # CHANGESET 001 — Tabla principal: consultas
+  # ================================================
+  - changeSet:
+      id: "001-create-table-consultas"
+      author: "hepaq"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: consultas
+      changes:
+        - createTable:
+            tableName: consultas
+            remarks: "Tabla de consultas/atenciones médicas — Write Model (Commands)"
+            columns:
+              - column:
+                  name: id
+                  type: uniqueidentifier
+                  remarks: "Identificador único UUID de la consulta"
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: paciente_id
+                  type: varchar(20)
+                  remarks: "DNI o código del paciente"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: medico_id
+                  type: varchar(50)
+                  remarks: "Código del médico responsable"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: cita_id
+                  type: uniqueidentifier
+                  remarks: "Referencia a la cita médica que originó esta consulta"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fecha_hora
+                  type: datetime2(0)
+                  remarks: "Fecha y hora de la consulta"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: tipo
+                  type: varchar(20)
+                  remarks: "PRIMERA_VEZ | CONTROL | SEGUIMIENTO | EMERGENCIA"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: estado
+                  type: varchar(20)
+                  defaultValue: "PENDIENTE"
+                  remarks: "PENDIENTE | EN_CURSO | COMPLETADA | CANCELADA"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: motivo_consulta
+                  type: nvarchar(500)
+                  remarks: "Motivo de la consulta referido por el paciente"
+              - column:
+                  name: anamnesis
+                  type: nvarchar(max)
+                  remarks: "Descripción de síntomas y antecedentes (historia clínica)"
+              - column:
+                  name: examen_fisico
+                  type: nvarchar(max)
+                  remarks: "Hallazgos del examen físico: PA, FC, temperatura, peso, etc."
+              - column:
+                  name: observaciones
+                  type: nvarchar(max)
+                  remarks: "Observaciones clínicas del médico"
+              - column:
+                  name: tratamiento
+                  type: nvarchar(max)
+                  remarks: "Plan de tratamiento indicado por el médico"
+              - column:
+                  name: motivo_cancelacion
+                  type: nvarchar(500)
+                  remarks: "Razón de cancelación si aplica"
+              - column:
+                  name: fecha_creacion
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fecha_actualizacion
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: creado_por
+                  type: varchar(100)
+                  remarks: "Usuario o servicio que creó el registro"
+              - column:
+                  name: version
+                  type: int
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  # ================================================
+  # CHANGESET 002 — Índices de rendimiento
+  # ================================================
+  - changeSet:
+      id: "002-indexes-consultas"
+      author: "hepaq"
+      changes:
+        - createIndex:
+            indexName: idx_consultas_paciente_id
+            tableName: consultas
+            columns:
+              - column:
+                  name: paciente_id
+
+        - createIndex:
+            indexName: idx_consultas_medico_id
+            tableName: consultas
+            columns:
+              - column:
+                  name: medico_id
+
+        # Unique: una cita solo puede generar una consulta
+        - createIndex:
+            indexName: uidx_consultas_cita_id
+            tableName: consultas
+            unique: true
+            columns:
+              - column:
+                  name: cita_id
+
+        - createIndex:
+            indexName: idx_consultas_estado
+            tableName: consultas
+            columns:
+              - column:
+                  name: estado
+
+        - createIndex:
+            indexName: idx_consultas_fecha_hora
+            tableName: consultas
+            columns:
+              - column:
+                  name: fecha_hora
+
+        # Índice compuesto: historia clínica de un paciente por fecha
+        - createIndex:
+            indexName: idx_consultas_paciente_fecha
+            tableName: consultas
+            columns:
+              - column:
+                  name: paciente_id
+              - column:
+                  name: fecha_hora
+                  descending: true
+
+  # ================================================
+  # CHANGESET 003 — Constraints de dominio
+  # ================================================
+  - changeSet:
+      id: "003-constraints-consultas"
+      author: "hepaq"
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE consultas
+              ADD CONSTRAINT chk_consultas_tipo
+              CHECK (tipo IN ('PRIMERA_VEZ', 'CONTROL', 'SEGUIMIENTO', 'EMERGENCIA'));
+
+        - sql:
+            sql: |
+              ALTER TABLE consultas
+              ADD CONSTRAINT chk_consultas_estado
+              CHECK (estado IN ('PENDIENTE', 'EN_CURSO', 'COMPLETADA', 'CANCELADA'));
+
+  # ================================================
+  # CHANGESET 004 — Tabla de signos vitales
+  # ================================================
+  - changeSet:
+      id: "004-create-table-signos-vitales"
+      author: "hepaq"
+      changes:
+        - createTable:
+            tableName: signos_vitales
+            remarks: "Registro de signos vitales por consulta"
+            columns:
+              - column:
+                  name: id
+                  type: uniqueidentifier
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: consulta_id
+                  type: uniqueidentifier
+                  constraints:
+                    nullable: false
+              - column:
+                  name: presion_sistolica
+                  type: int
+                  remarks: "mmHg"
+              - column:
+                  name: presion_diastolica
+                  type: int
+                  remarks: "mmHg"
+              - column:
+                  name: frecuencia_cardiaca
+                  type: int
+                  remarks: "lpm"
+              - column:
+                  name: frecuencia_respiratoria
+                  type: int
+                  remarks: "rpm"
+              - column:
+                  name: temperatura
+                  type: decimal(4,1)
+                  remarks: "°C"
+              - column:
+                  name: peso_kg
+                  type: decimal(5,2)
+                  remarks: "kg"
+              - column:
+                  name: talla_cm
+                  type: decimal(5,1)
+                  remarks: "cm"
+              - column:
+                  name: saturacion_oxigeno
+                  type: decimal(4,1)
+                  remarks: "%"
+              - column:
+                  name: glucosa_capilar
+                  type: int
+                  remarks: "mg/dL"
+              - column:
+                  name: registrado_por
+                  type: varchar(100)
+              - column:
+                  name: fecha_registro
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+
+        - addForeignKeyConstraint:
+            baseTableName: signos_vitales
+            baseColumnNames: consulta_id
+            constraintName: fk_signos_consulta_id
+            referencedTableName: consultas
+            referencedColumnNames: id
+            onDelete: CASCADE

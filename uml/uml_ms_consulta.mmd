@@ -1,0 +1,327 @@
+---
+title: HEPAQ - MS Consultas (C4 Nivel 4 - Class Diagram)
+---
+classDiagram
+
+    %% =====================
+    %% ENUMS
+    %% =====================
+
+    class TipoConsulta {
+        <<enumeration>>
+        PRIMERA_VEZ
+        CONTROL
+        SEGUIMIENTO
+        EMERGENCIA
+    }
+
+    class EstadoConsulta {
+        <<enumeration>>
+        PENDIENTE
+        EN_CURSO
+        COMPLETADA
+        CANCELADA
+    }
+
+    %% =====================
+    %% DOMAIN
+    %% =====================
+
+    class Consulta {
+        +UUID id
+        +String pacienteId
+        +String medicoId
+        +UUID citaId
+        +LocalDateTime fechaHora
+        +TipoConsulta tipo
+        +EstadoConsulta estado
+        +String motivoConsulta
+        +String anamnesis
+        +String examenFisico
+        +String observaciones
+        +String tratamiento
+        +LocalDateTime fechaCreacion
+        +LocalDateTime fechaActualizacion
+        +iniciar() void
+        +completar(observaciones String) void
+        +cancelar(motivo String) void
+        +estaEnCurso() boolean
+        +estaCompletada() boolean
+    }
+
+    Consulta --> TipoConsulta
+    Consulta --> EstadoConsulta
+
+    %% =====================
+    %% PATTERN: TEMPLATE METHOD
+    %% Define el flujo: validar → persistir → publicar evento
+    %% Las subclases implementan cada paso concreto
+    %% =====================
+
+    class ConsultaUseCaseTemplate {
+        <<abstract>>
+        -consultaRepository ConsultaRepositoryPort
+        -eventPublisher EventPublisherPort
+        +ejecutar(cmd ConsultaCommand) Consulta
+        #validar(cmd ConsultaCommand) void
+        #persistir(consulta Consulta) Consulta*
+        #publicarEvento(consulta Consulta) void*
+    }
+
+    class RegistrarConsultaUseCase {
+        -citaPort CitaPort
+        -medicoPort MedicoPort
+        #persistir(consulta Consulta) Consulta
+        #publicarEvento(consulta Consulta) void
+        -construirConsulta(cmd RegistrarConsultaCommand) Consulta
+        -validarCitaExiste(citaId UUID) void
+    }
+
+    class EditarConsultaUseCase {
+        #persistir(consulta Consulta) Consulta
+        #publicarEvento(consulta Consulta) void
+        -aplicarCambios(consulta Consulta, cmd EditarConsultaCommand) Consulta
+    }
+
+    class CancelarConsultaUseCase {
+        #persistir(consulta Consulta) Consulta
+        #publicarEvento(consulta Consulta) void
+        -validarCancelable(consulta Consulta) void
+    }
+
+    ConsultaUseCaseTemplate <|-- RegistrarConsultaUseCase
+    ConsultaUseCaseTemplate <|-- EditarConsultaUseCase
+    ConsultaUseCaseTemplate <|-- CancelarConsultaUseCase
+    ConsultaUseCaseTemplate --> ConsultaRepositoryPort
+    ConsultaUseCaseTemplate --> EventPublisherPort
+    RegistrarConsultaUseCase --> CitaPort
+    RegistrarConsultaUseCase --> MedicoPort
+
+    %% =====================
+    %% COMMANDS
+    %% =====================
+
+    class ConsultaCommand {
+        <<abstract>>
+        +String solicitanteId
+        +LocalDateTime timestamp
+    }
+
+    class RegistrarConsultaCommand {
+        +String pacienteId
+        +String medicoId
+        +UUID citaId
+        +TipoConsulta tipo
+        +String motivoConsulta
+        +String anamnesis
+    }
+
+    class EditarConsultaCommand {
+        +UUID consultaId
+        +String anamnesis
+        +String examenFisico
+        +String observaciones
+        +String tratamiento
+    }
+
+    class CancelarConsultaCommand {
+        +UUID consultaId
+        +String motivoCancelacion
+    }
+
+    ConsultaCommand <|-- RegistrarConsultaCommand
+    ConsultaCommand <|-- EditarConsultaCommand
+    ConsultaCommand <|-- CancelarConsultaCommand
+
+    %% =====================
+    %% QUERY SERVICES
+    %% =====================
+
+    class ObtenerConsultaQuery {
+        -consultaCosmosAdapter ConsultaCosmosAdapter
+        -consultaRedisAdapter ConsultaRedisAdapter
+        +ejecutar(id UUID) ConsultaDTO
+        -buscarEnCache(id UUID) Optional~ConsultaDTO~
+        -buscarEnCosmos(id UUID) ConsultaDTO
+    }
+
+    class ListarConsultasQuery {
+        -consultaCosmosAdapter ConsultaCosmosAdapter
+        -consultaRedisAdapter ConsultaRedisAdapter
+        +ejecutar(pacienteId String) List~ConsultaDTO~
+        +ejecutarPorMedico(medicoId String) List~ConsultaDTO~
+        -construirCacheKey(pacienteId String) String
+    }
+
+    ObtenerConsultaQuery --> ConsultaCosmosAdapter
+    ObtenerConsultaQuery --> ConsultaRedisAdapter
+    ListarConsultasQuery --> ConsultaCosmosAdapter
+    ListarConsultasQuery --> ConsultaRedisAdapter
+
+    %% =====================
+    %% PORTS
+    %% =====================
+
+    class ConsultaRepositoryPort {
+        <<interface>>
+        +guardar(consulta Consulta) Consulta
+        +obtener(id UUID) Optional~Consulta~
+        +actualizar(consulta Consulta) Consulta
+        +existePorCita(citaId UUID) boolean
+    }
+
+    class ConsultaReadRepositoryPort {
+        <<interface>>
+        +obtenerPorId(id UUID) Optional~ConsultaDTO~
+        +listarPorPaciente(pacienteId String) List~ConsultaDTO~
+        +listarPorMedico(medicoId String) List~ConsultaDTO~
+    }
+
+    class ConsultaCachePort {
+        <<interface>>
+        +obtener(key String) Optional~ConsultaDTO~
+        +guardar(key String, dto ConsultaDTO, ttl Duration) void
+        +invalidar(key String) void
+        +invalidarPorPaciente(pacienteId String) void
+    }
+
+    class CitaPort {
+        <<interface>>
+        +obtenerCita(citaId UUID) CitaDTO
+        +existeCita(citaId UUID) boolean
+    }
+
+    class MedicoPort {
+        <<interface>>
+        +obtenerMedico(medicoId String) MedicoDTO
+        +esValido(medicoId String) boolean
+    }
+
+    class EventPublisherPort {
+        <<interface>>
+        +publish(event DomainEvent) void
+    }
+
+    %% =====================
+    %% ADAPTERS
+    %% =====================
+
+    class ConsultaJpaAdapter {
+        -repository ConsultaJpaRepository
+        -mapper ConsultaMapper
+        +guardar(consulta Consulta) Consulta
+        +obtener(id UUID) Optional~Consulta~
+        +actualizar(consulta Consulta) Consulta
+        +existePorCita(citaId UUID) boolean
+    }
+
+    class ConsultaCosmosAdapter {
+        -repository ConsultaCosmosRepository
+        -mapper ConsultaMapper
+        +obtenerPorId(id UUID) Optional~ConsultaDTO~
+        +listarPorPaciente(pacienteId String) List~ConsultaDTO~
+        +listarPorMedico(medicoId String) List~ConsultaDTO~
+        +guardar(dto ConsultaDTO) void
+        +actualizar(dto ConsultaDTO) void
+    }
+
+    class ConsultaRedisAdapter {
+        -repository ConsultaRedisRepository
+        -defaultTtl Duration
+        +obtener(key String) Optional~ConsultaDTO~
+        +guardar(key String, dto ConsultaDTO, ttl Duration) void
+        +invalidar(key String) void
+        +invalidarPorPaciente(pacienteId String) void
+    }
+
+    class CitaWebClientAdapter {
+        -webClient WebClient
+        -citasBaseUrl String
+        +obtenerCita(citaId UUID) CitaDTO
+        +existeCita(citaId UUID) boolean
+    }
+
+    class MedicoWebClientAdapter {
+        -webClient WebClient
+        -medicosBaseUrl String
+        +obtenerMedico(medicoId String) MedicoDTO
+        +esValido(medicoId String) boolean
+    }
+
+    class ServiceBusPublisherAdapter {
+        -senderClient ServiceBusSenderClient
+        -topicName String
+        +publish(event DomainEvent) void
+        -serializar(event DomainEvent) String
+    }
+
+    ConsultaRepositoryPort <|.. ConsultaJpaAdapter
+    ConsultaReadRepositoryPort <|.. ConsultaCosmosAdapter
+    ConsultaCachePort <|.. ConsultaRedisAdapter
+    CitaPort <|.. CitaWebClientAdapter
+    MedicoPort <|.. MedicoWebClientAdapter
+    EventPublisherPort <|.. ServiceBusPublisherAdapter
+
+    %% =====================
+    %% EVENT CONSUMER
+    %% =====================
+
+    class RegistrarConsultaConsumer {
+        -registrarUseCase RegistrarConsultaUseCase
+        -objectMapper ObjectMapper
+        +consume(message ServiceBusReceivedMessage) void
+        -deserializar(payload String) RegistrarConsultaCommand
+        -manejarError(ex Exception) void
+    }
+
+    RegistrarConsultaConsumer --> RegistrarConsultaUseCase
+
+    %% =====================
+    %% REST LAYER
+    %% =====================
+
+    class ConsultasController {
+        -delegate ConsultaDelegate
+        +registrarConsulta(request RegistrarConsultaRequest) ResponseEntity~ConsultaDTO~
+        +editarConsulta(id UUID, request EditarConsultaRequest) ResponseEntity~ConsultaDTO~
+        +cancelarConsulta(id UUID, request CancelarConsultaRequest) ResponseEntity~Void~
+        +obtenerConsulta(id UUID) ResponseEntity~ConsultaDTO~
+        +listarConsultas(pacienteId String) ResponseEntity~List~ConsultaDTO~~
+    }
+
+    class ConsultaDelegate {
+        -editarUseCase EditarConsultaUseCase
+        -cancelarUseCase CancelarConsultaUseCase
+        -obtenerQuery ObtenerConsultaQuery
+        -listarQuery ListarConsultasQuery
+        -mapper ConsultaMapper
+        +editar(id UUID, request EditarConsultaRequest) ConsultaDTO
+        +cancelar(id UUID, request CancelarConsultaRequest) void
+        +obtener(id UUID) ConsultaDTO
+        +listar(pacienteId String) List~ConsultaDTO~
+    }
+
+    class ConsultaMapper {
+        +toDTO(consulta Consulta) ConsultaDTO
+        +toDomain(request RegistrarConsultaRequest) Consulta
+        +toCommand(request RegistrarConsultaRequest) RegistrarConsultaCommand
+        +toEntity(consulta Consulta) ConsultaEntity
+        +toDomainFromEntity(entity ConsultaEntity) Consulta
+    }
+
+    class ConsultaEventPublisher {
+        -eventPublisher EventPublisherPort
+        +publicarConsultaRegistrada(consulta Consulta) void
+        +publicarConsultaEditada(consulta Consulta) void
+        +publicarConsultaCancelada(consulta Consulta) void
+    }
+
+    ConsultasController --> ConsultaDelegate
+    ConsultaDelegate --> EditarConsultaUseCase
+    ConsultaDelegate --> CancelarConsultaUseCase
+    ConsultaDelegate --> ObtenerConsultaQuery
+    ConsultaDelegate --> ListarConsultasQuery
+    ConsultaDelegate --> ConsultaMapper
+    ConsultaEventPublisher --> EventPublisherPort
+    ConsultaJpaAdapter --> ConsultaMapper
+    ConsultaCosmosAdapter --> ConsultaMapper

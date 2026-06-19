@@ -1,0 +1,329 @@
+---
+title: HEPAQ - MS Notificaciones (C4 Nivel 4 - Class Diagram)
+---
+classDiagram
+
+    %% =====================
+    %% ENUMS
+    %% =====================
+
+    class TipoNotificacion {
+        <<enumeration>>
+        CITA_AGENDADA
+        CITA_CANCELADA
+        CITA_REAGENDADA
+        CONSULTA_CANCELADA
+        EXAMEN_COMPLETADO
+        DIAGNOSTICO_REGISTRADO
+    }
+
+    class EstadoNotificacion {
+        <<enumeration>>
+        PENDIENTE
+        ENVIADA
+        FALLIDA
+        REINTENTANDO
+    }
+
+    class CanalNotificacion {
+        <<enumeration>>
+        EMAIL
+        SMS
+        PUSH
+    }
+
+    %% =====================
+    %% DOMAIN
+    %% =====================
+
+    class Notificacion {
+        +UUID id
+        +String pacienteId
+        +String destinatario
+        +String destinatarioSecundario
+        +String asunto
+        +String cuerpo
+        +TipoNotificacion tipo
+        +CanalNotificacion canal
+        +EstadoNotificacion estado
+        +int intentos
+        +int maxIntentos
+        +String errorMensaje
+        +LocalDateTime fechaEnvio
+        +LocalDateTime fechaCreacion
+        +marcarEnviada() void
+        +marcarFallida(error String) void
+        +incrementarIntentos() void
+        +puedeReintentar() boolean
+        +requiereAcuse() boolean
+    }
+
+    Notificacion --> TipoNotificacion
+    Notificacion --> EstadoNotificacion
+    Notificacion --> CanalNotificacion
+
+    class PlantillaNotificacion {
+        +String codigo
+        +TipoNotificacion tipo
+        +CanalNotificacion canal
+        +String asuntoTemplate
+        +String cuerpoTemplate
+        +String idioma
+        +boolean activa
+        +String renderizar(variables Map~String_String~) String
+        +boolean esCompatibleCon(canal CanalNotificacion) boolean
+    }
+
+    %% =====================
+    %% PATTERN: STRATEGY
+    %% Cada canal de envío tiene su propia implementación
+    %% =====================
+
+    class NotificacionStrategy {
+        <<interface>>
+        +enviar(notificacion Notificacion) void
+        +soportaCanal(canal CanalNotificacion) boolean
+        +validarDestinatario(destinatario String) boolean
+    }
+
+    class EmailNotificacionStrategy {
+        -notificacionSenderPort NotificacionSenderPort
+        -emailTemplatePort EmailTemplatePort
+        +enviar(notificacion Notificacion) void
+        +soportaCanal(canal CanalNotificacion) boolean
+        +validarDestinatario(destinatario String) boolean
+        -construirMensaje(notificacion Notificacion) EmailMessage
+        -validarFormatoEmail(email String) boolean
+    }
+
+    class SmsNotificacionStrategy {
+        -smsClient SmsClient
+        -remitenteNumero String
+        +enviar(notificacion Notificacion) void
+        +soportaCanal(canal CanalNotificacion) boolean
+        +validarDestinatario(destinatario String) boolean
+        -normalizarNumero(numero String) String
+        -truncarMensaje(cuerpo String) String
+    }
+
+    NotificacionStrategy <|.. EmailNotificacionStrategy
+    NotificacionStrategy <|.. SmsNotificacionStrategy
+    EmailNotificacionStrategy --> NotificacionSenderPort
+    EmailNotificacionStrategy --> EmailTemplatePort
+
+    %% =====================
+    %% PATTERN: COMPOSITE
+    %% Permite enviar por múltiples canales (email + SMS)
+    %% como si fuera una única estrategia
+    %% =====================
+
+    class CompositeNotificacionStrategy {
+        -strategies List~NotificacionStrategy~
+        +agregar(strategy NotificacionStrategy) void
+        +remover(canal CanalNotificacion) void
+        +enviar(notificacion Notificacion) void
+        +soportaCanal(canal CanalNotificacion) boolean
+        +validarDestinatario(destinatario String) boolean
+        -notificarErrorParcial(canal CanalNotificacion, ex Exception) void
+    }
+
+    NotificacionStrategy <|.. CompositeNotificacionStrategy
+    CompositeNotificacionStrategy --> NotificacionStrategy : strategies
+
+    %% =====================
+    %% PATTERN: FACTORY METHOD
+    %% =====================
+
+    class NotificacionStrategyFactory {
+        -emailStrategy EmailNotificacionStrategy
+        -smsStrategy SmsNotificacionStrategy
+        -compositeStrategy CompositeNotificacionStrategy
+        +obtener(tipo TipoNotificacion) NotificacionStrategy
+        +obtenerParaCanal(canal CanalNotificacion) NotificacionStrategy
+        +obtenerMulticanal(canales List~CanalNotificacion~) CompositeNotificacionStrategy
+        -resolverCanales(tipo TipoNotificacion) List~CanalNotificacion~
+    }
+
+    NotificacionStrategyFactory --> NotificacionStrategy
+    NotificacionStrategyFactory --> CompositeNotificacionStrategy : crea
+
+    %% =====================
+    %% APPLICATION - USE CASE
+    %% =====================
+
+    class GenerarNotificacionUseCase {
+        -notificacionRepository NotificacionRepositoryPort
+        -strategyFactory NotificacionStrategyFactory
+        -emailTemplatePort EmailTemplatePort
+        +ejecutar(cmd GenerarNotificacionCommand) Notificacion
+        -construirNotificacion(cmd GenerarNotificacionCommand) Notificacion
+        -intentarEnvio(notificacion Notificacion, strategy NotificacionStrategy) void
+        -manejarFallo(notificacion Notificacion, ex Exception) void
+        -registrarAuditoria(notificacion Notificacion) void
+    }
+
+    GenerarNotificacionUseCase --> NotificacionRepositoryPort
+    GenerarNotificacionUseCase --> NotificacionStrategyFactory
+    GenerarNotificacionUseCase --> EmailTemplatePort
+
+    %% =====================
+    %% COMMAND
+    %% =====================
+
+    class GenerarNotificacionCommand {
+        +String pacienteId
+        +String destinatarioEmail
+        +String destinatarioTelefono
+        +TipoNotificacion tipo
+        +Map~String_String~ variables
+        +List~CanalNotificacion~ canalesPreferidos
+        +String idEventoOrigen
+    }
+
+    %% =====================
+    %% PORTS
+    %% =====================
+
+    class NotificacionRepositoryPort {
+        <<interface>>
+        +guardar(notificacion Notificacion) Notificacion
+        +obtener(id UUID) Optional~Notificacion~
+        +actualizar(notificacion Notificacion) void
+        +listarFallidas(maxIntentos int) List~Notificacion~
+        +listarPorPaciente(pacienteId String) List~Notificacion~
+    }
+
+    class NotificacionSenderPort {
+        <<interface>>
+        +enviar(mensaje EmailMessage) void
+        +enviarConAdjunto(mensaje EmailMessage, adjunto byte[], nombreAdjunto String) void
+    }
+
+    class EmailTemplatePort {
+        <<interface>>
+        +construir(tipo TipoNotificacion, variables Map~String_String~) EmailContent
+        +obtenerPlantilla(tipo TipoNotificacion, idioma String) PlantillaNotificacion
+        +renderizar(plantilla PlantillaNotificacion, variables Map~String_String~) String
+    }
+
+    %% =====================
+    %% ADAPTERS
+    %% =====================
+
+    class NotificacionJpaAdapter {
+        -repository NotificacionJpaRepository
+        -mapper NotificacionMapper
+        +guardar(notificacion Notificacion) Notificacion
+        +obtener(id UUID) Optional~Notificacion~
+        +actualizar(notificacion Notificacion) void
+        +listarFallidas(maxIntentos int) List~Notificacion~
+        +listarPorPaciente(pacienteId String) List~Notificacion~
+    }
+
+    class JavaMailAdapter {
+        -javaMailSender JavaMailSender
+        -remitenteEmail String
+        -nombreRemitente String
+        +enviar(mensaje EmailMessage) void
+        +enviarConAdjunto(mensaje EmailMessage, adjunto byte[], nombreAdjunto String) void
+        -construirMimeMessage(mensaje EmailMessage) MimeMessage
+        -configurarRemitente(mimeHelper MimeMessageHelper) void
+    }
+
+    class ThymeleafEmailTemplateAdapter {
+        -templateEngine TemplateEngine
+        -plantillaRepository PlantillaNotificacionRepository
+        +construir(tipo TipoNotificacion, variables Map~String_String~) EmailContent
+        +obtenerPlantilla(tipo TipoNotificacion, idioma String) PlantillaNotificacion
+        +renderizar(plantilla PlantillaNotificacion, variables Map~String_String~) String
+        -construirContexto(variables Map~String_String~) Context
+        -resolverNombrePlantilla(tipo TipoNotificacion) String
+    }
+
+    NotificacionRepositoryPort <|.. NotificacionJpaAdapter
+    NotificacionSenderPort <|.. JavaMailAdapter
+    EmailTemplatePort <|.. ThymeleafEmailTemplateAdapter
+
+    %% =====================
+    %% VALUE OBJECTS
+    %% =====================
+
+    class EmailMessage {
+        +String destinatario
+        +String asunto
+        +String cuerpoHtml
+        +String cuerpoTexto
+        +List~String~ cc
+        +List~String~ bcc
+        +boolean esHtml
+    }
+
+    class EmailContent {
+        +String asunto
+        +String cuerpoHtml
+        +String cuerpoTexto
+    }
+
+    %% =====================
+    %% EVENT CONSUMER
+    %% =====================
+
+    class GenerarNotificacionConsumer {
+        -generarUseCase GenerarNotificacionUseCase
+        -objectMapper ObjectMapper
+        +consume(message ServiceBusReceivedMessage) void
+        -deserializar(payload String) GenerarNotificacionCommand
+        -identificarTipoEvento(headers Map~String_Object~) TipoNotificacion
+        -manejarError(ex Exception, message ServiceBusReceivedMessage) void
+        -enviarADeadLetter(message ServiceBusReceivedMessage, motivo String) void
+    }
+
+    GenerarNotificacionConsumer --> GenerarNotificacionUseCase
+
+    %% =====================
+    %% RETRY SCHEDULER
+    %% =====================
+
+    class NotificacionRetryScheduler {
+        -generarUseCase GenerarNotificacionUseCase
+        -notificacionRepository NotificacionRepositoryPort
+        -maxReintentos int
+        -intervaloMinutos int
+        +procesarFallidas() void
+        -filtrarParaReintento(fallidas List~Notificacion~) List~Notificacion~
+        -construirCommandDesdeNotificacion(n Notificacion) GenerarNotificacionCommand
+    }
+
+    NotificacionRetryScheduler --> GenerarNotificacionUseCase
+    NotificacionRetryScheduler --> NotificacionRepositoryPort
+
+    %% =====================
+    %% DATA ACCESS
+    %% =====================
+
+    class NotificacionJpaRepository {
+        <<interface>>
+        +save(entity NotificacionEntity) NotificacionEntity
+        +findById(id UUID) Optional~NotificacionEntity~
+        +findByEstadoAndIntentosLessThan(estado EstadoNotificacion, maxIntentos int) List~NotificacionEntity~
+        +findByPacienteId(pacienteId String) List~NotificacionEntity~
+    }
+
+    class PlantillaNotificacionRepository {
+        <<interface>>
+        +findByTipoAndIdioma(tipo TipoNotificacion, idioma String) Optional~PlantillaEntity~
+        +findAllByActiva(activa boolean) List~PlantillaEntity~
+    }
+
+    class NotificacionMapper {
+        +toDTO(notificacion Notificacion) NotificacionDTO
+        +toDomain(entity NotificacionEntity) Notificacion
+        +toEntity(notificacion Notificacion) NotificacionEntity
+    }
+
+    NotificacionJpaAdapter --> NotificacionJpaRepository
+    NotificacionJpaAdapter --> NotificacionMapper
+    ThymeleafEmailTemplateAdapter --> PlantillaNotificacionRepository
+    JavaMailAdapter ..> EmailMessage
+    ThymeleafEmailTemplateAdapter ..> EmailContent
+    GenerarNotificacionUseCase ..> GenerarNotificacionCommand

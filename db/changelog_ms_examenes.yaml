@@ -1,0 +1,285 @@
+databaseChangeLog:
+
+  # ================================================
+  # CHANGESET 001 — Tabla principal: examenes
+  # ================================================
+  - changeSet:
+      id: "001-create-table-examenes"
+      author: "hepaq"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: examenes
+      changes:
+        - createTable:
+            tableName: examenes
+            remarks: "Tabla de exámenes médicos — Write Model (Commands)"
+            columns:
+              - column:
+                  name: id
+                  type: uniqueidentifier
+                  remarks: "Identificador único UUID del examen"
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: paciente_id
+                  type: varchar(20)
+                  remarks: "DNI o código del paciente"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: medico_id
+                  type: varchar(50)
+                  remarks: "Código del médico que solicita el examen"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: consulta_id
+                  type: uniqueidentifier
+                  remarks: "Consulta médica que generó la solicitud del examen"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: tipo
+                  type: varchar(20)
+                  remarks: "LABORATORIO | IMAGEN | ECOGRAFIA | RAYOS_X | TOMOGRAFIA | RESONANCIA"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: estado
+                  type: varchar(20)
+                  defaultValue: "PENDIENTE"
+                  remarks: "PENDIENTE | EN_PROCESO | COMPLETADO | CANCELADO | ELIMINADO"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: descripcion
+                  type: nvarchar(500)
+                  remarks: "Nombre o descripción del examen solicitado"
+              - column:
+                  name: indicaciones_previas
+                  type: nvarchar(1000)
+                  remarks: "Instrucciones al paciente: ayuno, preparación, etc."
+              - column:
+                  name: resultados
+                  type: nvarchar(max)
+                  remarks: "Resultados del examen en texto libre"
+              - column:
+                  name: interpretacion
+                  type: nvarchar(max)
+                  remarks: "Interpretación clínica del especialista"
+              - column:
+                  name: motivo_cancelacion
+                  type: nvarchar(500)
+                  remarks: "Motivo de cancelación si aplica"
+              - column:
+                  name: motivo_eliminacion
+                  type: nvarchar(500)
+                  remarks: "Motivo del soft delete"
+              - column:
+                  name: fecha_solicitud
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  remarks: "Fecha en que se solicitó el examen"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fecha_resultado
+                  type: datetime2(0)
+                  remarks: "Fecha en que se registraron los resultados (nullable)"
+              - column:
+                  name: fecha_creacion
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fecha_actualizacion
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: int
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+  # ================================================
+  # CHANGESET 002 — Tabla de adjuntos
+  # ================================================
+  - changeSet:
+      id: "002-create-table-adjuntos-examen"
+      author: "hepaq"
+      preConditions:
+        onFail: MARK_RAN
+        not:
+          tableExists:
+            tableName: adjuntos_examen
+      changes:
+        - createTable:
+            tableName: adjuntos_examen
+            remarks: "Metadatos de archivos adjuntos almacenados en Azure Blob Storage"
+            columns:
+              - column:
+                  name: id
+                  type: uniqueidentifier
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: examen_id
+                  type: uniqueidentifier
+                  constraints:
+                    nullable: false
+              - column:
+                  name: nombre_archivo
+                  type: varchar(500)
+                  remarks: "Nombre original del archivo subido"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: url_blob
+                  type: varchar(2000)
+                  remarks: "URL completa del blob en Azure Blob Storage"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: content_type
+                  type: varchar(100)
+                  remarks: "MIME type: image/jpeg, image/png, application/pdf, application/dicom"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: tamanio_bytes
+                  type: bigint
+                  remarks: "Tamaño del archivo en bytes"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: container_blob
+                  type: varchar(200)
+                  defaultValue: "examenes-adjuntos"
+                  remarks: "Nombre del container en Azure Blob Storage"
+              - column:
+                  name: subido_por
+                  type: varchar(100)
+                  remarks: "Usuario o servicio que subió el archivo"
+              - column:
+                  name: activo
+                  type: bit
+                  defaultValueBoolean: true
+                  remarks: "Soft delete — false indica que fue eliminado"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: fecha_subida
+                  type: datetime2(0)
+                  defaultValueComputed: "GETUTCDATE()"
+                  constraints:
+                    nullable: false
+
+        - addForeignKeyConstraint:
+            baseTableName: adjuntos_examen
+            baseColumnNames: examen_id
+            constraintName: fk_adjuntos_examen_id
+            referencedTableName: examenes
+            referencedColumnNames: id
+            onDelete: CASCADE
+
+  # ================================================
+  # CHANGESET 003 — Índices de rendimiento
+  # ================================================
+  - changeSet:
+      id: "003-indexes-examenes"
+      author: "hepaq"
+      changes:
+        - createIndex:
+            indexName: idx_examenes_paciente_id
+            tableName: examenes
+            columns:
+              - column:
+                  name: paciente_id
+
+        - createIndex:
+            indexName: idx_examenes_consulta_id
+            tableName: examenes
+            columns:
+              - column:
+                  name: consulta_id
+
+        - createIndex:
+            indexName: idx_examenes_estado
+            tableName: examenes
+            columns:
+              - column:
+                  name: estado
+
+        - createIndex:
+            indexName: idx_examenes_tipo
+            tableName: examenes
+            columns:
+              - column:
+                  name: tipo
+
+        # Exámenes pendientes de resultado por paciente
+        - createIndex:
+            indexName: idx_examenes_paciente_estado_tipo
+            tableName: examenes
+            columns:
+              - column:
+                  name: paciente_id
+              - column:
+                  name: estado
+              - column:
+                  name: tipo
+              - column:
+                  name: fecha_solicitud
+                  descending: true
+
+        # Adjuntos activos de un examen
+        - createIndex:
+            indexName: idx_adjuntos_examen_id_activo
+            tableName: adjuntos_examen
+            columns:
+              - column:
+                  name: examen_id
+              - column:
+                  name: activo
+
+  # ================================================
+  # CHANGESET 004 — Constraints de dominio
+  # ================================================
+  - changeSet:
+      id: "004-constraints-examenes"
+      author: "hepaq"
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE examenes
+              ADD CONSTRAINT chk_examenes_tipo
+              CHECK (tipo IN ('LABORATORIO', 'IMAGEN', 'ECOGRAFIA', 'RAYOS_X', 'TOMOGRAFIA', 'RESONANCIA'));
+
+        - sql:
+            sql: |
+              ALTER TABLE examenes
+              ADD CONSTRAINT chk_examenes_estado
+              CHECK (estado IN ('PENDIENTE', 'EN_PROCESO', 'COMPLETADO', 'CANCELADO', 'ELIMINADO'));
+
+        - sql:
+            sql: |
+              ALTER TABLE adjuntos_examen
+              ADD CONSTRAINT chk_adjuntos_content_type
+              CHECK (content_type IN (
+                'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+                'application/pdf', 'application/dicom', 'video/mp4'
+              ));
+
+        - sql:
+            sql: |
+              ALTER TABLE adjuntos_examen
+              ADD CONSTRAINT chk_adjuntos_tamanio
+              CHECK (tamanio_bytes > 0 AND tamanio_bytes <= 52428800);

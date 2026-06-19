@@ -1,0 +1,179 @@
+@startuml
+
+skinparam classAttributeIconSize 0
+
+package "Domain" {
+
+    enum TipoExamen {
+        LABORATORIO
+        IMAGEN
+        ECOGRAFIA
+        RAYOS_X
+        TOMOGRAFIA
+        RESONANCIA
+    }
+
+    enum EstadoExamen {
+        PENDIENTE
+        EN_PROCESO
+        COMPLETADO
+        CANCELADO
+        ELIMINADO
+    }
+
+    class Examen {
+        +id : UUID
+        +pacienteId : String
+        +medicoId : String
+        +consultaId : UUID
+        +tipo : TipoExamen
+        +estado : EstadoExamen
+        +descripcion : String
+        +fechaSolicitud : LocalDateTime
+        +fechaResultado : LocalDateTime
+    }
+
+    class AdjuntoExamen {
+        +id : UUID
+        +examenId : UUID
+        +nombreArchivo : String
+        +urlBlob : String
+        +contentType : String
+        +tamanioBytes : Long
+    }
+
+    Examen "1" *-- "0..*" AdjuntoExamen
+
+    ' ---------------------------------
+    ' Pattern: Strategy
+    ' Cada tipo de exámen tiene su propia lógica de validación y procesamiento
+    ' ---------------------------------
+
+    interface ExamenProcesadorStrategy {
+        +validar(examen : Examen)
+        +procesar(examen : Examen)
+    }
+
+    class LaboratorioExamenStrategy {
+        +validar(examen : Examen)
+        +procesar(examen : Examen)
+    }
+
+    class ImagenExamenStrategy {
+        +validar(examen : Examen)
+        +procesar(examen : Examen)
+    }
+
+    class EcografiaExamenStrategy {
+        +validar(examen : Examen)
+        +procesar(examen : Examen)
+    }
+
+    ExamenProcesadorStrategy <|.. LaboratorioExamenStrategy
+    ExamenProcesadorStrategy <|.. ImagenExamenStrategy
+    ExamenProcesadorStrategy <|.. EcografiaExamenStrategy
+
+}
+
+package "Application" {
+
+    class RegistrarExamenUseCase {
+        +ejecutar(cmd)
+    }
+
+    class CancelarExamenUseCase {
+        +ejecutar(cmd)
+    }
+
+    class EditarExamenUseCase {
+        +ejecutar(cmd)
+    }
+
+    class BorrarExamenUseCase {
+        +ejecutar(cmd)
+    }
+
+    class ExamenStrategyFactory {
+        +obtener(tipo : TipoExamen) : ExamenProcesadorStrategy
+    }
+
+    ExamenStrategyFactory --> ExamenProcesadorStrategy
+    RegistrarExamenUseCase --> ExamenStrategyFactory
+
+}
+
+package "Ports" {
+
+    interface ExamenRepositoryPort {
+        +guardar(examen)
+        +obtener(id)
+        +actualizar(examen)
+        +eliminar(id)
+    }
+
+    interface ExamenReadRepositoryPort {
+        +obtenerPorId(id)
+        +listar(filtros)
+    }
+
+    interface ExamenCachePort {
+        +obtener(id)
+        +invalidar(id)
+    }
+
+    interface BlobStoragePort {
+        +subir(archivo)
+        +obtener(url)
+        +eliminar(url)
+    }
+
+    interface EventPublisherPort {
+        +publish(event)
+    }
+
+}
+
+package "Adapters" {
+
+    class ExamenJpaAdapter
+
+    class ExamenCosmosAdapter
+
+    class ExamenRedisAdapter
+
+    class BlobStorageAdapter
+
+    class ServiceBusPublisherAdapter
+
+    ExamenRepositoryPort <|.. ExamenJpaAdapter
+
+    ExamenReadRepositoryPort <|.. ExamenCosmosAdapter
+
+    ExamenCachePort <|.. ExamenRedisAdapter
+
+    BlobStoragePort <|.. BlobStorageAdapter
+
+    EventPublisherPort <|.. ServiceBusPublisherAdapter
+
+}
+
+RegistrarExamenUseCase --> ExamenRepositoryPort
+RegistrarExamenUseCase --> BlobStoragePort
+RegistrarExamenUseCase --> EventPublisherPort
+
+CancelarExamenUseCase --> ExamenRepositoryPort
+CancelarExamenUseCase --> EventPublisherPort
+
+EditarExamenUseCase --> ExamenRepositoryPort
+EditarExamenUseCase --> BlobStoragePort
+EditarExamenUseCase --> EventPublisherPort
+
+BorrarExamenUseCase --> ExamenRepositoryPort
+BorrarExamenUseCase --> BlobStoragePort
+BorrarExamenUseCase --> EventPublisherPort
+
+ExamenJpaAdapter --> Examen
+ExamenCosmosAdapter --> Examen
+BlobStorageAdapter --> AdjuntoExamen
+
+@enduml

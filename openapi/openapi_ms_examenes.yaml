@@ -1,0 +1,506 @@
+openapi: "3.0.3"
+
+info:
+  title: HEPAQ - MS Exámenes API
+  description: |
+    API REST para la gestión de exámenes médicos (laboratorio, imagen, ecografía, etc.) de la plataforma HEPAQ.
+    El registro, cancelación y eliminación de exámenes se realiza vía Azure Service Bus (event-driven).
+    La API REST expone operaciones de edición (ingreso de resultados), consulta y gestión de adjuntos.
+    Los adjuntos (imágenes, PDFs) se almacenan en Azure Blob Storage.
+    Implementa el patrón Strategy para el procesamiento específico de cada tipo de examen.
+  version: "1.0.0"
+  contact:
+    name: HEPAQ Dev Team
+    email: dev@hepaq.pe
+
+servers:
+  - url: https://api.hepaq.pe/examenes/v1
+    description: Producción
+  - url: https://api-dev.hepaq.pe/examenes/v1
+    description: Desarrollo / QA
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Exámenes
+    description: Consulta y edición de exámenes médicos
+  - name: Adjuntos
+    description: Gestión de archivos adjuntos (imágenes, PDFs, resultados)
+
+paths:
+
+  /examenes:
+    get:
+      tags: [Exámenes]
+      operationId: listarExamenes
+      summary: Listar exámenes de un paciente
+      description: |
+        Retorna el listado paginado de exámenes médicos.
+        Consulta en cache Redis con fallback a Cosmos DB (Read Model).
+      parameters:
+        - name: pacienteId
+          in: query
+          required: false
+          description: Filtrar por identificador del paciente
+          schema:
+            type: string
+        - name: consultaId
+          in: query
+          description: Filtrar por consulta que originó los exámenes
+          schema:
+            type: string
+            format: uuid
+        - name: tipo
+          in: query
+          description: Filtrar por tipo de examen
+          schema:
+            $ref: '#/components/schemas/TipoExamen'
+        - name: estado
+          in: query
+          description: Filtrar por estado del examen
+          schema:
+            $ref: '#/components/schemas/EstadoExamen'
+        - name: fechaDesde
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: fechaHasta
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Listado paginado de exámenes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedExamenDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /examenes/{id}:
+    get:
+      tags: [Exámenes]
+      operationId: obtenerExamen
+      summary: Obtener detalle de un examen
+      description: Retorna el detalle completo de un examen incluyendo sus adjuntos. Prioriza cache Redis.
+      parameters:
+        - $ref: '#/components/parameters/ExamenId'
+      responses:
+        '200':
+          description: Detalle del examen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamenDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [Exámenes]
+      operationId: editarExamen
+      summary: Editar un examen — ingresar resultados e interpretación
+      description: |
+        Actualiza los resultados e interpretación de un examen en estado EN_PROCESO o COMPLETADO.
+        Permite agregar o eliminar adjuntos. Los nuevos adjuntos se suben a Azure Blob Storage.
+        La estrategia de procesamiento se determina según el tipo de examen (laboratorio, imagen, etc.).
+        Publica el evento ExamenEditadoEvent al Service Bus.
+      parameters:
+        - $ref: '#/components/parameters/ExamenId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EditarExamenRequest'
+            encoding:
+              adjuntosNuevos:
+                contentType: image/jpeg, image/png, application/pdf, application/dicom
+      responses:
+        '200':
+          description: Examen editado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamenDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: Archivo adjunto supera el tamaño máximo permitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDTO'
+        '415':
+          description: Tipo de archivo no soportado para este tipo de examen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDTO'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /examenes/{id}/adjuntos:
+    get:
+      tags: [Adjuntos]
+      operationId: listarAdjuntos
+      summary: Listar adjuntos de un examen
+      description: Retorna los metadatos de todos los archivos adjuntos del examen.
+      parameters:
+        - $ref: '#/components/parameters/ExamenId'
+      responses:
+        '200':
+          description: Listado de adjuntos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdjuntoDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /examenes/{id}/adjuntos/{adjuntoId}:
+    get:
+      tags: [Adjuntos]
+      operationId: obtenerAdjunto
+      summary: Obtener un adjunto específico del examen
+      description: |
+        Retorna la URL firmada (SAS URL) de Azure Blob Storage para descargar el archivo adjunto.
+        La URL tiene una vigencia de 15 minutos por razones de seguridad.
+      parameters:
+        - $ref: '#/components/parameters/ExamenId'
+        - name: adjuntoId
+          in: path
+          required: true
+          description: Identificador único del adjunto (UUID)
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Metadatos y URL de descarga del adjunto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdjuntoDetalleDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [Adjuntos]
+      operationId: eliminarAdjunto
+      summary: Eliminar un adjunto del examen
+      description: Elimina un adjunto del examen y lo borra de Azure Blob Storage.
+      parameters:
+        - $ref: '#/components/parameters/ExamenId'
+        - name: adjuntoId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Adjunto eliminado exitosamente
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ExamenId:
+      name: id
+      in: path
+      required: true
+      description: Identificador único del examen (UUID)
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+
+    TipoExamen:
+      type: string
+      enum:
+        - LABORATORIO
+        - IMAGEN
+        - ECOGRAFIA
+        - RAYOS_X
+        - TOMOGRAFIA
+        - RESONANCIA
+      description: Tipo de examen médico
+
+    EstadoExamen:
+      type: string
+      enum:
+        - PENDIENTE
+        - EN_PROCESO
+        - COMPLETADO
+        - CANCELADO
+        - ELIMINADO
+      description: Estado actual del examen
+
+    EditarExamenRequest:
+      type: object
+      properties:
+        resultados:
+          type: string
+          maxLength: 5000
+          description: Resultados del examen en texto libre
+          example: "Hemoglobina: 14.2 g/dL, Hematocrito: 42%"
+        interpretacion:
+          type: string
+          maxLength: 2000
+          description: Interpretación clínica del médico especialista
+          example: "Valores dentro de rango normal"
+        adjuntosNuevos:
+          type: array
+          description: Archivos a subir (máx. 20MB por archivo para imágenes, 5MB para PDFs)
+          items:
+            type: string
+            format: binary
+        adjuntosAEliminar:
+          type: array
+          description: IDs de adjuntos a eliminar
+          items:
+            type: string
+            format: uuid
+
+    ExamenDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "770e8400-e29b-41d4-a716-446655440003"
+        pacienteId:
+          type: string
+          example: "12345678"
+        medicoId:
+          type: string
+          example: "MED-001"
+        consultaId:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        tipo:
+          $ref: '#/components/schemas/TipoExamen'
+        estado:
+          $ref: '#/components/schemas/EstadoExamen'
+        descripcion:
+          type: string
+          example: "Hemograma completo"
+        indicacionesPrevias:
+          type: string
+          example: "Ayuno de 8 horas previo al examen"
+        resultados:
+          type: string
+          example: "Hemoglobina: 14.2 g/dL"
+        interpretacion:
+          type: string
+          example: "Valores dentro de rango normal"
+        fechaSolicitud:
+          type: string
+          format: date-time
+        fechaResultado:
+          type: string
+          format: date-time
+          nullable: true
+        fechaCreacion:
+          type: string
+          format: date-time
+        adjuntos:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdjuntoDTO'
+
+    AdjuntoDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "880e8400-e29b-41d4-a716-446655440004"
+        examenId:
+          type: string
+          format: uuid
+        nombreArchivo:
+          type: string
+          example: "resultado_hemograma.pdf"
+        contentType:
+          type: string
+          example: "application/pdf"
+        tamanioBytes:
+          type: integer
+          format: int64
+          example: 204800
+        fechaSubida:
+          type: string
+          format: date-time
+        subidoPor:
+          type: string
+          example: "MED-001"
+
+    AdjuntoDetalleDTO:
+      allOf:
+        - $ref: '#/components/schemas/AdjuntoDTO'
+        - type: object
+          properties:
+            urlDescarga:
+              type: string
+              format: uri
+              description: URL SAS firmada de Azure Blob Storage (válida 15 minutos)
+              example: "https://storage.blob.core.windows.net/examenes/resultado.pdf?sv=2021&sig=..."
+            urlExpiracion:
+              type: string
+              format: date-time
+              description: Fecha y hora de expiración de la URL firmada
+
+    PagedExamenDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExamenDTO'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        last:
+          type: boolean
+
+    ErrorDTO:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        traceId:
+          type: string
+
+    ValidationErrorDTO:
+      allOf:
+        - $ref: '#/components/schemas/ErrorDTO'
+        - type: object
+          properties:
+            fieldErrors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+
+  responses:
+    BadRequest:
+      description: Solicitud inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorDTO'
+
+    Unauthorized:
+      description: Token JWT ausente, expirado o inválido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    Forbidden:
+      description: Sin permisos para esta operación
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    UnprocessableEntity:
+      description: Estado inválido para la operación
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'
+
+    InternalServerError:
+      description: Error interno del servidor
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDTO'

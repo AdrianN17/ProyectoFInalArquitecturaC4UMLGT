@@ -1,0 +1,127 @@
+@startuml
+
+skinparam classAttributeIconSize 0
+
+package "Domain" {
+
+    enum TipoDiagnostico {
+        PRESUNTIVO
+        DEFINITIVO
+        DIFERENCIAL
+        SECUNDARIO
+    }
+
+    enum EstadoDiagnostico {
+        ACTIVO
+        RESUELTO
+        CRONICO
+        ELIMINADO
+    }
+
+    class Diagnostico {
+        +id : UUID
+        +pacienteId : String
+        +medicoId : String
+        +consultaId : UUID
+        +codigoCIE : String
+        +descripcion : String
+        +tipo : TipoDiagnostico
+        +estado : EstadoDiagnostico
+        +fechaRegistro : LocalDateTime
+    }
+
+    class CodigoCIE {
+        +codigo : String
+        +descripcion : String
+        +categoria : String
+    }
+
+}
+
+package "Application" {
+
+    class RegistrarDiagnosticoUseCase {
+        +ejecutar(cmd)
+    }
+
+    class BorrarDiagnosticoUseCase {
+        +ejecutar(cmd)
+    }
+
+}
+
+package "Ports" {
+
+    interface DiagnosticoRepositoryPort {
+        +guardar(diagnostico)
+        +obtener(id)
+        +eliminar(id)
+    }
+
+    interface DiagnosticoReadRepositoryPort {
+        +obtenerPorId(id)
+        +listar(filtros)
+    }
+
+    interface CieRepositoryPort {
+        +listar()
+        +obtenerPorCodigo(codigo)
+    }
+
+    interface EventPublisherPort {
+        +publish(event)
+    }
+
+}
+
+package "Adapters" {
+
+    class DiagnosticoJpaAdapter
+
+    class DiagnosticoCosmosAdapter
+
+    class DiagnosticoRedisAdapter
+
+    ' ---------------------------------
+    ' Pattern: Decorator (Cache-Aside)
+    ' Envuelve DiagnosticoRepositoryPort para agregar
+    ' lógica de cache transparente sin modificar el adaptador JPA
+    ' ---------------------------------
+
+    class DiagnosticoCacheDecorator {
+        -delegate : DiagnosticoRepositoryPort
+        +guardar(diagnostico)
+        +obtener(id)
+        +eliminar(id)
+    }
+
+    class CieTableAdapter
+
+    class ServiceBusPublisherAdapter
+
+    DiagnosticoRepositoryPort <|.. DiagnosticoJpaAdapter
+
+    DiagnosticoRepositoryPort <|.. DiagnosticoCacheDecorator
+    DiagnosticoCacheDecorator --> DiagnosticoRepositoryPort : delegate
+    DiagnosticoCacheDecorator --> DiagnosticoRedisAdapter : cache
+
+    DiagnosticoReadRepositoryPort <|.. DiagnosticoCosmosAdapter
+
+    CieRepositoryPort <|.. CieTableAdapter
+
+    EventPublisherPort <|.. ServiceBusPublisherAdapter
+
+}
+
+RegistrarDiagnosticoUseCase --> DiagnosticoRepositoryPort
+RegistrarDiagnosticoUseCase --> CieRepositoryPort
+RegistrarDiagnosticoUseCase --> EventPublisherPort
+
+BorrarDiagnosticoUseCase --> DiagnosticoRepositoryPort
+BorrarDiagnosticoUseCase --> EventPublisherPort
+
+DiagnosticoJpaAdapter --> Diagnostico
+DiagnosticoCosmosAdapter --> Diagnostico
+CieTableAdapter --> CodigoCIE
+
+@enduml
