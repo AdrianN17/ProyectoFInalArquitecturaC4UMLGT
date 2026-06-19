@@ -18,7 +18,7 @@ participant "EmailNotificacion\nStrategy" as EmailStrat
 participant "SmsNotificacion\nStrategy" as SmsStrat
 participant "Thymeleaf\nEmailTemplateAdapter" as Thymeleaf
 participant "JavaMailAdapter" as MailAdp
-component "SMTP\nMicrosoft 365" as SMTP
+participant "SMTP\nMicrosoft 365" as SMTP
 participant "Notificacion\nJpaAdapter" as JpaAdp
 database "Azure SQL\nDatabase" as SQL
 participant "RetryNotificacion\nScheduler" as Scheduler

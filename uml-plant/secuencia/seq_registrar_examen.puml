@@ -26,7 +26,7 @@ participant "Examenes\nController" as Controller
 participant "Examen\nDelegate" as Delegate
 participant "Editar\nExamenUseCase" as EditarUC
 participant "BlobStorage\nAdapter" as BlobAdp
-storage "Azure Blob\nStorage" as Blob
+participant "Azure Blob\nStorage" as Blob
 
 == Fase 1 — Creación automática por evento de MS Consultas ==
 
