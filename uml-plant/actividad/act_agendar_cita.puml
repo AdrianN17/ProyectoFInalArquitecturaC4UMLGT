@@ -1,0 +1,101 @@
+@startuml HEPAQ_Activity_AgendarCita
+
+skinparam backgroundColor #FFFFFF
+skinparam ActivityBackgroundColor #EAF2FF
+skinparam ActivityBorderColor #2980B9
+skinparam ActivityDiamondBackgroundColor #FEF9E7
+skinparam ActivityDiamondBorderColor #F39C12
+skinparam ArrowColor #444444
+skinparam noteBackgroundColor #FFFFCC
+skinparam noteBorderColor #AAAAAA
+skinparam shadowing false
+
+title HEPAQ — Diagrama de Actividad · Agendar Cita Médica
+
+start
+
+:Recibir solicitud\nPOST /citas/v1/citas;
+
+if (JWT Bearer válido?) then (Sí)
+else (No)
+  #FF6B6B:401 Unauthorized\nToken inválido o expirado;
+  stop
+endif
+
+if (Rol autorizado?\nMEDICO o DIGITADOR?) then (Sí)
+else (No)
+  #FF6B6B:403 Forbidden\nSin permiso para agendar citas;
+  stop
+endif
+
+if (Request válido?\npacienteId · medicoId · fechaHora · tipo?) then (Sí)
+else (No)
+  #FF6B6B:400 Bad Request\nCampos inválidos o faltantes;
+  stop
+endif
+
+note right
+  Chain of Responsibility
+  inicia aquí
+end note
+
+:Chain 1: Validar identidad del paciente\nvía RENIEC API;
+
+if (DNI encontrado en RENIEC?) then (Sí)
+else (No)
+  #FF6B6B:422 Unprocessable Entity\nDNI no registrado en RENIEC;
+  stop
+endif
+
+:Chain 2: Validar cobertura de seguro\nvía EsSalud Sistema de Aseguramiento;
+
+if (Cobertura vigente?) then (Sí)
+else (No)
+  #FF6B6B:422 Unprocessable Entity\nPaciente sin cobertura activa;
+  stop
+endif
+
+:Consultar cache Redis\n(MedicosRedisAdapter);
+
+if (Cache hit?) then (Sí)
+  :Usar datos del médico desde Redis;
+else (No)
+  :Llamar Directorio Médico API\nGET /medicos/{id}/disponibilidad;
+  :Guardar resultado en Redis\nTTL = 300 segundos;
+endif
+
+:Chain 3: Verificar disponibilidad del médico;
+
+if (Médico disponible en el slot?) then (Sí)
+else (No)
+  #FF6B6B:409 Conflict\nNo hay slots disponibles\npara el médico y fecha indicados;
+  stop
+endif
+
+note right
+  Strategy Pattern
+  inicia aquí
+end note
+
+switch (¿Tipo de cita?)
+case (CONSULTA_MEDICA)
+  :ConsultaMedicaStrategy\nvalidar horario + reservar slot médico;
+case (LABORATORIO)
+  :LaboratorioStrategy\nvalidar capacidad del laboratorio;
+case (ECOGRAFIA)
+  :EcografiaStrategy\nvalidar disponibilidad de equipo;
+endswitch
+
+:Persistir cita en Azure SQL\nINSERT INTO citas (...)\n[Write Model — CQRS];
+
+:Sincronizar en Azure Cosmos DB\nupsert citaDocument\n[Read Model — CQRS];
+
+:Invalidar cache Redis\nDEL citas:paciente:{pacienteId};
+
+:Publicar CitaAgendadaEvent\nal Azure Service Bus\n→ MS Consulta lo consumirá para crear la consulta\n→ MS Notificaciones enviará Email/SMS al paciente;
+
+#90EE90:201 Created\n{citaId, estado: PENDIENTE, fechaHora};
+
+stop
+
+@enduml

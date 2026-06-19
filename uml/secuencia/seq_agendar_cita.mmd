@@ -1,0 +1,91 @@
+---
+title: HEPAQ — Secuencia · Agendar Cita
+---
+sequenceDiagram
+    actor Paciente as Paciente / Digitador
+    participant APIM as Azure API Management
+    participant Controller as CitasController
+    participant Delegate as CitaDelegate
+    participant UseCase as AgendarCitaUseCase
+    participant RH as ReniecValidacionHandler
+    participant SH as SeguroValidacionHandler
+    participant DH as DisponibilidadMedicoHandler
+    participant RENIEC as RENIEC API
+    participant Seguro as EsSalud Seguro
+    participant DirMed as Directorio Médico
+    participant MedRedis as MedicosRedisAdapter
+    participant Factory as AgendaStrategyFactory
+    participant Strategy as AgendaStrategy
+    participant JPA as CitaJpaAdapter
+    participant SQL as Azure SQL Database
+    participant Cosmos as CitaCosmosAdapter
+    participant CosmosDB as Azure Cosmos DB
+    participant Redis as CitaRedisAdapter
+    participant RedisDB as Azure Cache for Redis
+    participant SBPub as ServiceBusPublisher
+    participant SB as Azure Service Bus
+
+    Paciente->>APIM: POST /citas/v1/citas [Bearer JWT]
+    APIM->>APIM: Validar JWT con Microsoft Entra ID
+    APIM->>Controller: agendarCita(AgendarCitaRequest)
+    Controller->>Delegate: agendarCita(request)
+    Delegate->>UseCase: ejecutar(AgendarCitaCmd)
+
+    Note over UseCase,DH: Chain of Responsibility — Validaciones en cadena
+
+    UseCase->>RH: validar(cita)
+    RH->>RENIEC: GET /personas/{dni}
+    RENIEC-->>RH: 200 OK · Persona válida
+    RH->>SH: validar(cita)
+    SH->>Seguro: GET /asegurados/{pacienteId}/cobertura
+    Seguro-->>SH: 200 OK · Cobertura activa
+    SH->>DH: validar(cita)
+    DH->>MedRedis: obtenerDisponibilidad(medicoId, fecha)
+    alt Cache hit en Redis
+        MedRedis->>RedisDB: GET medicos:{medicoId}
+        RedisDB-->>MedRedis: Datos del médico
+    else Cache miss
+        MedRedis->>DirMed: GET /medicos/{id}/disponibilidad
+        DirMed-->>MedRedis: 200 OK · Slot disponible
+        MedRedis->>RedisDB: SET medicos:{medicoId} TTL=300s
+    end
+    MedRedis-->>DH: Disponibilidad confirmada
+    DH-->>UseCase: Cadena de validaciones OK
+
+    Note over UseCase,Strategy: Strategy Pattern — Selección de estrategia
+
+    UseCase->>Factory: obtener(TipoCita)
+    Factory-->>UseCase: ConsultaMedicaStrategy / LaboratorioStrategy / EcografiaStrategy
+    UseCase->>Strategy: validar(cita)
+    UseCase->>Strategy: reservar(cita)
+    Strategy-->>UseCase: Cita con slot confirmado
+
+    Note over UseCase,SQL: Persistencia Write Model (CQRS)
+
+    UseCase->>JPA: guardar(cita)
+    JPA->>SQL: INSERT INTO citas (...) VALUES (...)
+    SQL-->>JPA: OK · id generado
+    JPA-->>UseCase: Cita persistida
+
+    Note over UseCase,CosmosDB: Sincronización Read Model (CQRS)
+
+    UseCase->>Cosmos: guardar(citaDocument)
+    Cosmos->>CosmosDB: upsert /citas/{id}
+    CosmosDB-->>Cosmos: OK
+
+    Note over UseCase,RedisDB: Invalidación de Cache
+
+    UseCase->>Redis: invalidar(pacienteId)
+    Redis->>RedisDB: DEL citas:paciente:{id}
+    RedisDB-->>Redis: OK
+
+    Note over UseCase,SB: Publicación de Evento de Dominio
+
+    UseCase->>SBPub: publish(CitaAgendadaEvent)
+    SBPub->>SB: Message → topic: citas-agendadas
+    SB-->>SBPub: ACK
+
+    UseCase-->>Delegate: CitaDTO {id, estado: PENDIENTE}
+    Delegate-->>Controller: CitaDTO
+    Controller-->>APIM: 201 Created
+    APIM-->>Paciente: 201 Created {citaId, estado: PENDIENTE}

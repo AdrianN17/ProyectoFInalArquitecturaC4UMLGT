@@ -1,0 +1,48 @@
+@startuml HEPAQ_State_Diagnostico
+
+skinparam backgroundColor #FFFFFF
+skinparam stateBackgroundColor #EAF2FF
+skinparam stateBorderColor #2980B9
+skinparam stateArrowColor #444444
+skinparam noteBackgroundColor #FFFFCC
+skinparam noteBorderColor #AAAAAA
+skinparam shadowing false
+
+title HEPAQ — Diagrama de Estados · Diagnóstico Médico (CIE-10)
+
+[*] --> ACTIVO : POST /diagnosticos\nRegistrarDiagnosticoUseCase\n[código CIE-10 validado contra Azure Table Storage]
+
+ACTIVO --> RESUELTO : resolverDiagnostico()\n[médico marca resolución clínica]
+ACTIVO --> CRONICO : clasificarCronico()\n[médico clasifica como crónico]
+ACTIVO --> ELIMINADO : borrarDiagnostico(motivo)\n[soft delete · BorrarDiagnosticoUseCase]
+
+RESUELTO --> ACTIVO : reactivar()\n[recaída o error de clasificación]
+RESUELTO --> ELIMINADO : borrarDiagnostico(motivo)
+
+CRONICO --> RESUELTO : resolverDiagnostico()\n[resolución de enfermedad crónica]
+CRONICO --> ELIMINADO : borrarDiagnostico(motivo)
+
+ELIMINADO --> [*]
+
+state ACTIVO : Estado inicial tras el registro.\nEl diagnóstico tiene código CIE-10 validado.
+state RESUELTO : El paciente se recuperó.\nPermanece en el historial clínico como referencia.
+state CRONICO : El diagnóstico persiste en el tiempo.\nAparece como condición preexistente en nuevas consultas.
+state ELIMINADO : Soft delete: eliminado_por y motivo_eliminacion\nse populan. El registro permanece en BD para auditoría.
+
+note right of ACTIVO
+  Al registrar un diagnóstico:
+  - se valida el código CIE-10 en Azure Table Storage
+  - se persiste vía DiagnosticoCacheDecorator (JPA + Redis)
+  - se sincroniza el Read Model en Cosmos DB
+  - se publica DiagnosticoRegistradoEvent al Service Bus
+end note
+
+note right of ELIMINADO
+  El soft delete NO elimina físicamente el registro.
+  Se establece estado = 'ELIMINADO' y se registra:
+  - eliminado_por (usuario que realizó la acción)
+  - motivo_eliminacion (razón del borrado)
+  Permite trazabilidad y auditoría completa.
+end note
+
+@enduml

@@ -1,0 +1,73 @@
+---
+title: HEPAQ — MS Consulta · Diagrama de Componentes
+---
+flowchart TB
+    APIM([Azure API Management\nGateway])
+
+    subgraph MSConsulta["MS Consulta — Spring Boot WebFlux · Java 21"]
+        direction TB
+
+        subgraph API["API Layer"]
+            Controller["ConsultasController\n«REST Controller»"]
+            Delegate["ConsultaDelegate\n«Delegate»"]
+            Mapper["ConsultaMapper\n«MapStruct»"]
+        end
+
+        subgraph TM["Template Method — Flujo de Use Case"]
+            Template["ConsultaUseCaseTemplate\n«abstract» validar → persistir → publicarEvento"]
+            RegistrarUC["RegistrarConsultaUseCase"]
+            EditarUC["EditarConsultaUseCase"]
+            CancelarUC["CancelarConsultaUseCase"]
+            Template -.->|extends| RegistrarUC
+            Template -.->|extends| EditarUC
+            Template -.->|extends| CancelarUC
+        end
+
+        subgraph QRY["Query Side (CQRS)"]
+            ListarQ["ListarConsultaQuery\n«Query Service»"]
+            ObtenerQ["ObtenerConsultaQuery\n«Query Service»"]
+        end
+
+        subgraph Consumers["Event Consumers"]
+            RegistrarConsumer["RegistrarConsultaConsumer\n«Service Bus Consumer»\nCitaAgendadaEvent"]
+        end
+
+        subgraph ADP["Adapters Outbound"]
+            JpaAdp["ConsultaJpaAdapter\n«JPA Adapter»"]
+            CosmosAdp["ConsultaCosmosAdapter\n«Cosmos Adapter»"]
+            RedisAdp["ConsultaRedisAdapter\n«Redis Adapter»"]
+            SBPub["ServiceBusPublisher\n«Service Bus Adapter»"]
+        end
+    end
+
+    SQL[("Azure SQL Database\nWrite Model")]
+    CosmosDB[("Azure Cosmos DB\nRead Model")]
+    RedisDB[("Azure Cache for Redis")]
+    SB(["Azure Service Bus\nTopics / Subscriptions"])
+
+    APIM --> Controller
+    Controller --> Delegate
+    Delegate --> Mapper
+    Delegate --> EditarUC
+    Delegate --> CancelarUC
+    Delegate --> ListarQ
+    Delegate --> ObtenerQ
+
+    SB -->|CitaAgendadaEvent| RegistrarConsumer
+    RegistrarConsumer --> RegistrarUC
+
+    RegistrarUC --> JpaAdp
+    EditarUC --> JpaAdp
+    CancelarUC --> JpaAdp
+    RegistrarUC --> CosmosAdp
+    EditarUC --> CosmosAdp
+    CancelarUC --> CosmosAdp
+    RegistrarUC --> RedisAdp
+    EditarUC --> RedisAdp
+    CancelarUC --> RedisAdp
+    CancelarUC --> SBPub
+
+    JpaAdp --> SQL
+    CosmosAdp --> CosmosDB
+    RedisAdp --> RedisDB
+    SBPub --> SB

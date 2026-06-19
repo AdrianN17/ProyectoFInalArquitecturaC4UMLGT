@@ -1,0 +1,43 @@
+---
+title: HEPAQ — Diagrama de Estados · Notificación
+---
+stateDiagram-v2
+    [*] --> PENDIENTE : GenerarNotificacionUseCase\n[evento recibido del Service Bus\nnotificación creada en BD]
+
+    PENDIENTE --> ENVIADA : envío exitoso\n[CompositeNotificacionStrategy OK\nSMTP 250 / SMS ACK]
+    PENDIENTE --> FALLIDA : error en envío\n[SMTP timeout / SMS error\nintentos_actuales = 1]
+
+    FALLIDA --> REINTENTANDO : RetryNotificacionScheduler\n[@Scheduled · backoff exponencial\nintentos_actuales < max_reintentos]
+
+    REINTENTANDO --> ENVIADA : reintento exitoso\n[canal disponible]
+    REINTENTANDO --> FALLIDA : reintento fallido\n[intentos_actuales++]
+    REINTENTANDO --> FALLIDA_DEFINITIVA : máx reintentos alcanzados\n[intentos_actuales >= max_reintentos (default: 3)]
+
+    ENVIADA --> [*]
+    FALLIDA_DEFINITIVA --> [*]
+
+    note right of PENDIENTE
+        Se persiste en estado PENDIENTE
+        antes de intentar el envío.
+        Canal: EMAIL | SMS | EMAIL_SMS
+    end note
+
+    note right of REINTENTANDO
+        Backoff exponencial:
+        intento 1: 1 min
+        intento 2: 5 min
+        intento 3: 15 min
+    end note
+
+    note right of ENVIADA
+        fecha_envio se registra.
+        Se guarda registro en
+        notificaciones_intentos
+        con exitoso=1.
+    end note
+
+    note right of FALLIDA_DEFINITIVA
+        Se registra error_mensaje
+        y error_codigo del proveedor.
+        Requiere intervención manual.
+    end note

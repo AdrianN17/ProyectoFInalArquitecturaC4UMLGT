@@ -1,0 +1,107 @@
+---
+title: HEPAQ — MS Citas · Diagrama de Componentes
+---
+flowchart TB
+    APIM([Azure API Management\nGateway])
+
+    subgraph MSCitas["MS Citas — Spring Boot WebFlux · Java 21"]
+        direction TB
+
+        subgraph API["API Layer"]
+            Controller["CitasController\n«REST Controller»"]
+            Delegate["CitaDelegate\n«Delegate»"]
+            Mapper["CitaMapper\n«MapStruct»"]
+        end
+
+        subgraph Chain["Chain of Responsibility — Validación"]
+            RH["ReniecValidacionHandler"]
+            SH["SeguroValidacionHandler"]
+            DH["DisponibilidadMedicoHandler"]
+            RH --> SH --> DH
+        end
+
+        subgraph Strat["Strategy Pattern — Agendamiento"]
+            StratFactory["AgendaStrategyFactory\n«Factory Method»"]
+            CS["ConsultaMedicaStrategy"]
+            LS["LaboratorioStrategy"]
+            ES["EcografiaStrategy"]
+        end
+
+        subgraph CMD["Command Side (CQRS)"]
+            AgendarSvc["AgendarCitaService\n«Command Service»"]
+            CancelarSvc["CancelarCitaService\n«Command Service»"]
+            ReagendarSvc["ReagendarCitaService\n«Command Service»"]
+            EventPub["CitaEventPublisher\n«Domain Event Publisher»"]
+        end
+
+        subgraph QRY["Query Side (CQRS)"]
+            ListarQ["ListarCitaQuery\n«Query Service»"]
+            ObtenerQ["ObtenerCitaQuery\n«Query Service»"]
+        end
+
+        Consumer["AgendarCitaConsumer\n«Service Bus Consumer»"]
+
+        subgraph ADP["Adapters Outbound"]
+            JpaAdp["CitaJpaAdapter\n«JPA Adapter»"]
+            CosmosAdp["CitaCosmosAdapter\n«Cosmos Adapter»"]
+            RedisAdp["CitaRedisAdapter\n«Redis Adapter»"]
+            MedRedisAdp["MedicosRedisAdapter\n«Redis Adapter»"]
+            ReniecWC["ReniecWebClient\n«WebClient»"]
+            SeguroWC["SeguroWebClient\n«WebClient»"]
+            MedicosWC["MedicosWebClient\n«WebClient»"]
+            SBPub["ServiceBusPublisher\n«Service Bus Adapter»"]
+        end
+    end
+
+    RENIEC(["RENIEC\nValidación DNI"])
+    Seguro(["EsSalud Seguro\nValidación Cobertura"])
+    DirMedico(["Directorio Médico\nDisponibilidad"])
+    SQL[("Azure SQL Database\nWrite Model")]
+    CosmosDB[("Azure Cosmos DB\nRead Model")]
+    RedisDB[("Azure Cache for Redis\nCache Distribuida")]
+    SB(["Azure Service Bus\nTopics / Subscriptions"])
+
+    APIM --> Controller
+    Controller --> Delegate
+    Delegate --> Mapper
+    Delegate --> AgendarSvc
+    Delegate --> CancelarSvc
+    Delegate --> ReagendarSvc
+    Delegate --> ListarQ
+    Delegate --> ObtenerQ
+
+    SB -->|AgendarCitaCommand| Consumer
+    Consumer --> AgendarSvc
+
+    AgendarSvc --> RH
+    ReagendarSvc --> RH
+    ReniecWC --> RENIEC
+    SeguroWC --> Seguro
+    DH --> MedRedisAdp
+    MedRedisAdp -->|cache miss| MedicosWC --> DirMedico
+
+    AgendarSvc --> StratFactory
+    StratFactory --> CS
+    StratFactory --> LS
+    StratFactory --> ES
+
+    AgendarSvc --> JpaAdp
+    CancelarSvc --> JpaAdp
+    ReagendarSvc --> JpaAdp
+    AgendarSvc --> CosmosAdp
+    CancelarSvc --> CosmosAdp
+    ReagendarSvc --> CosmosAdp
+    AgendarSvc --> RedisAdp
+    CancelarSvc --> RedisAdp
+    ReagendarSvc --> RedisAdp
+    AgendarSvc --> EventPub
+    EventPub --> SBPub
+
+    RH --> ReniecWC
+    SH --> SeguroWC
+
+    JpaAdp --> SQL
+    CosmosAdp --> CosmosDB
+    RedisAdp --> RedisDB
+    MedRedisAdp --> RedisDB
+    SBPub --> SB

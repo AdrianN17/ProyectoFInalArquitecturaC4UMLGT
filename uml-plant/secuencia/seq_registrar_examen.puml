@@ -1,0 +1,139 @@
+@startuml HEPAQ_Seq_RegistrarExamen
+
+skinparam backgroundColor #FFFFFF
+skinparam sequenceArrowThickness 2
+skinparam sequenceGroupBorderColor #999999
+skinparam sequenceGroupBackgroundColor #F5F5F5
+skinparam noteBorderColor #AAAAAA
+skinparam noteBackgroundColor #FFFFCC
+
+title HEPAQ — Secuencia · Registrar Examen y Cargar Adjunto
+
+queue "Azure Service Bus" as SB
+participant "Registrar\nExamenConsumer" as Consumer
+participant "Registrar\nExamenUseCase" as UseCase
+participant "ExamenStrategy\nFactory" as Factory
+participant "ExamenProcesador\nStrategy" as Strategy
+participant "Examen\nJpaAdapter" as JpaAdp
+database "Azure SQL\nDatabase" as SQL
+participant "Examen\nCosmosAdapter" as CosmosAdp
+database "Azure Cosmos DB" as CosmosDB
+participant "ServiceBus\nPublisher" as SBPub
+
+actor "Médico" as Medico
+participant "Azure API\nManagement" as APIM
+participant "Examenes\nController" as Controller
+participant "Examen\nDelegate" as Delegate
+participant "Editar\nExamenUseCase" as EditarUC
+participant "BlobStorage\nAdapter" as BlobAdp
+storage "Azure Blob\nStorage" as Blob
+
+== Fase 1 — Creación automática por evento de MS Consultas ==
+
+SB -> Consumer : ExamenOrigenEvent\n{consultaId, pacienteId, medicoId, tipoExamen}
+activate Consumer
+Consumer -> UseCase : ejecutar(RegistrarExamenCmd)
+activate UseCase
+
+group Strategy Pattern — Selección por tipo de examen
+    UseCase -> Factory : obtener(TipoExamen)
+    activate Factory
+    Factory --> UseCase : LaboratorioExamenStrategy / ImagenExamenStrategy / EcografiaExamenStrategy
+    deactivate Factory
+    UseCase -> Strategy : validar(examen)
+    activate Strategy
+    Strategy --> UseCase : Examen válido
+    UseCase -> Strategy : procesar(examen)
+    Strategy --> UseCase : Examen procesado {estado: PENDIENTE}
+    deactivate Strategy
+end
+
+UseCase -> JpaAdp : guardar(examen)
+activate JpaAdp
+JpaAdp -> SQL : INSERT INTO examenes (...) VALUES (...)
+SQL --> JpaAdp : OK · id generado
+deactivate JpaAdp
+UseCase -> CosmosAdp : guardar(examenDocument)
+activate CosmosAdp
+CosmosAdp -> CosmosDB : upsert /examenes/{id}
+CosmosDB --> CosmosAdp : OK
+deactivate CosmosAdp
+UseCase -> SBPub : publish(ExamenRegistradoEvent)
+activate SBPub
+SBPub -> SB : Message → topic: examenes-registrados
+deactivate SBPub
+deactivate UseCase
+deactivate Consumer
+
+== Fase 2 — Médico ingresa resultados ==
+
+Medico -> APIM : PUT /examenes/v1/examenes/{id} [Bearer JWT]
+activate APIM
+APIM -> Controller : editarExamen(id, EditarExamenRequest)
+activate Controller
+Controller -> Delegate : editarExamen(id, request)
+activate Delegate
+Delegate -> EditarUC : ejecutar(EditarExamenCmd)
+activate EditarUC
+EditarUC -> JpaAdp : actualizar(examen{resultados, interpretacion, estado: EN_PROCESO})
+activate JpaAdp
+JpaAdp -> SQL : UPDATE examenes SET resultados=?, estado='EN_PROCESO' WHERE id=?
+SQL --> JpaAdp : OK
+deactivate JpaAdp
+EditarUC -> CosmosAdp : actualizar(examenDocument)
+EditarUC --> Delegate : ExamenDTO
+deactivate EditarUC
+Controller --> APIM : 200 OK
+deactivate Controller
+deactivate Delegate
+APIM --> Medico : 200 OK {examenId, estado: EN_PROCESO}
+deactivate APIM
+
+== Fase 3 — Médico sube adjunto (PDF / DICOM / Imagen) ==
+
+Medico -> APIM : POST /examenes/v1/examenes/{id}/adjuntos\n[multipart/form-data]
+activate APIM
+APIM -> Controller : subirAdjunto(id, archivo)
+activate Controller
+Controller -> Delegate : subirAdjunto(id, archivo)
+activate Delegate
+Delegate -> EditarUC : ejecutar(AgregarAdjuntoCmd)
+activate EditarUC
+
+EditarUC -> BlobAdp : subir(archivo, contentType)
+activate BlobAdp
+BlobAdp -> Blob : PUT /examenes-adjuntos/{uuid}/{filename}
+activate Blob
+Blob --> BlobAdp : URL SAS firmada (TTL = 15 min)
+deactivate Blob
+BlobAdp --> EditarUC : urlBlob
+deactivate BlobAdp
+
+EditarUC -> JpaAdp : guardarAdjunto(AdjuntoExamen{urlBlob, contentType, tamanioBytes})
+activate JpaAdp
+JpaAdp -> SQL : INSERT INTO adjuntos_examen (...) VALUES (...)
+SQL --> JpaAdp : OK
+JpaAdp --> EditarUC : AdjuntoExamen
+deactivate JpaAdp
+
+EditarUC -> JpaAdp : actualizar(examen{estado: COMPLETADO})
+activate JpaAdp
+JpaAdp -> SQL : UPDATE examenes SET estado='COMPLETADO' WHERE id=?
+SQL --> JpaAdp : OK
+deactivate JpaAdp
+
+EditarUC -> SBPub : publish(ExamenCompletadoEvent)
+activate SBPub
+SBPub -> SB : Message → topic: examenes-completados
+SB --> SBPub : ACK
+deactivate SBPub
+
+EditarUC --> Delegate : AdjuntoDTO {urlBlob}
+deactivate EditarUC
+Controller --> APIM : 201 Created
+deactivate Controller
+deactivate Delegate
+APIM --> Medico : 201 Created {adjuntoId, urlBlob}
+deactivate APIM
+
+@enduml

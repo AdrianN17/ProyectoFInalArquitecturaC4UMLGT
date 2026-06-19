@@ -1,0 +1,39 @@
+---
+title: HEPAQ — Diagrama de Estados · Consulta Médica
+---
+stateDiagram-v2
+    [*] --> PENDIENTE : CitaAgendadaEvent\nRegistrarConsultaUseCase
+
+    PENDIENTE --> EN_CURSO : médico inicia atención\n[editarConsulta → estado EN_CURSO]
+    PENDIENTE --> CANCELADA : cancelarConsulta(motivo)\n[antes de la atención]
+
+    EN_CURSO --> COMPLETADA : guardarConsulta()\n[médico completa la atención\nanamnesis + examen físico + tratamiento]
+    EN_CURSO --> CANCELADA : cancelarConsulta(motivo)\n[emergencia / no show]
+
+    COMPLETADA --> [*]
+    CANCELADA --> [*]
+
+    state EN_CURSO {
+        [*] --> RegistrandoAnamnesis
+        RegistrandoAnamnesis --> RegistrandoExamenFisico : anamnesis guardada
+        RegistrandoExamenFisico --> RegistrandoSignosVitales : examen físico registrado
+        RegistrandoSignosVitales --> RegistrandoTratamiento : signos vitales guardados
+        RegistrandoTratamiento --> [*] : tratamiento registrado
+    }
+
+    note right of PENDIENTE
+        Creada automáticamente al recibir
+        CitaAgendadaEvent del Service Bus.
+        Espera que el médico inicie la atención.
+    end note
+
+    note right of COMPLETADA
+        La consulta tiene anamnesis,
+        examen físico y plan de tratamiento.
+        Puede originar diagnósticos y exámenes.
+    end note
+
+    note right of CANCELADA
+        Publica ConsultaCanceladaEvent
+        al Service Bus para notificar al paciente.
+    end note

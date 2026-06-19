@@ -1,0 +1,115 @@
+@startuml HEPAQ_MS_Citas_Componentes
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+skinparam ArrowColor #444444
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+title HEPAQ — MS Citas · Diagrama de Componentes
+
+component "Azure API Management\nGateway" as APIM
+
+package "MS Citas — Spring Boot WebFlux · Java 21" {
+
+    package "API Layer" {
+        component [CitasController\n«REST Controller»] as Controller
+        component [CitaDelegate\n«Delegate»] as Delegate
+        component [CitaMapper\n«MapStruct»] as Mapper
+    }
+
+    package "Chain of Responsibility — Validación" {
+        component [ReniecValidacionHandler] as RH
+        component [SeguroValidacionHandler] as SH
+        component [DisponibilidadMedicoHandler] as DH
+    }
+    RH --> SH
+    SH --> DH
+
+    package "Strategy Pattern — Agendamiento" {
+        component [AgendaStrategyFactory\n«Factory Method»] as Factory
+        component [ConsultaMedicaStrategy] as CS
+        component [LaboratorioStrategy] as LS
+        component [EcografiaStrategy] as ES
+    }
+    Factory --> CS
+    Factory --> LS
+    Factory --> ES
+
+    package "Command Side (CQRS)" {
+        component [AgendarCitaService\n«Command Service»] as AgendarSvc
+        component [CancelarCitaService\n«Command Service»] as CancelarSvc
+        component [ReagendarCitaService\n«Command Service»] as ReagendarSvc
+        component [CitaEventPublisher\n«Domain Event Publisher»] as EventPub
+    }
+
+    package "Query Side (CQRS)" {
+        component [ListarCitaQuery\n«Query Service»] as ListarQ
+        component [ObtenerCitaQuery\n«Query Service»] as ObtenerQ
+    }
+
+    component [AgendarCitaConsumer\n«Service Bus Consumer»] as Consumer
+
+    package "Adapters Outbound" {
+        component [CitaJpaAdapter\n«JPA Adapter»] as JpaAdp
+        component [CitaCosmosAdapter\n«Cosmos Adapter»] as CosmosAdp
+        component [CitaRedisAdapter\n«Redis Adapter»] as RedisAdp
+        component [MedicosRedisAdapter\n«Redis Adapter»] as MedRedisAdp
+        component [ReniecWebClient\n«WebClient»] as ReniecWC
+        component [SeguroWebClient\n«WebClient»] as SeguroWC
+        component [MedicosWebClient\n«WebClient»] as MedicosWC
+        component [ServiceBusPublisher\n«Service Bus Adapter»] as SBPub
+    }
+}
+
+database "Azure SQL Database\nWrite Model" as SQL
+database "Azure Cosmos DB\nRead Model" as CosmosDB
+database "Azure Cache for Redis\nCache Distribuida" as RedisDB
+queue "Azure Service Bus\nTopics / Subscriptions" as SB
+component "RENIEC\nValidación DNI" as RENIEC
+component "EsSalud Seguro\nValidación Cobertura" as Seguro
+component "Directorio Médico\nDisponibilidad" as DirMedico
+
+APIM --> Controller
+Controller --> Delegate
+Delegate --> Mapper
+Delegate --> AgendarSvc
+Delegate --> CancelarSvc
+Delegate --> ReagendarSvc
+Delegate --> ListarQ
+Delegate --> ObtenerQ
+
+SB --> Consumer : AgendarCitaCommand
+Consumer --> AgendarSvc
+
+AgendarSvc --> RH
+ReagendarSvc --> RH
+RH --> ReniecWC
+SH --> SeguroWC
+DH --> MedRedisAdp
+MedRedisAdp ..> MedicosWC : cache miss
+
+AgendarSvc --> Factory
+
+AgendarSvc --> JpaAdp
+CancelarSvc --> JpaAdp
+ReagendarSvc --> JpaAdp
+AgendarSvc --> CosmosAdp
+CancelarSvc --> CosmosAdp
+ReagendarSvc --> CosmosAdp
+AgendarSvc --> RedisAdp
+CancelarSvc --> RedisAdp
+ReagendarSvc --> RedisAdp
+AgendarSvc --> EventPub
+EventPub --> SBPub
+
+ReniecWC --> RENIEC
+SeguroWC --> Seguro
+MedicosWC --> DirMedico
+JpaAdp --> SQL
+CosmosAdp --> CosmosDB
+RedisAdp --> RedisDB
+MedRedisAdp --> RedisDB
+SBPub --> SB
+
+@enduml

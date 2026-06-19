@@ -1,0 +1,81 @@
+@startuml HEPAQ_MS_Diagnosticos_Componentes
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+skinparam ArrowColor #444444
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+title HEPAQ — MS Diagnósticos · Diagrama de Componentes
+
+component "Azure API Management\nGateway" as APIM
+
+package "MS Diagnósticos — Spring Boot WebFlux · Java 21" {
+
+    package "API Layer" {
+        component [DiagnosticosController\n«REST Controller»] as Controller
+        component [DiagnosticoDelegate\n«Delegate»] as Delegate
+        component [DiagnosticoMapper\n«MapStruct»] as Mapper
+    }
+
+    package "Application (Use Cases)" {
+        component [RegistrarDiagnosticoUseCase] as RegistrarUC
+        component [BorrarDiagnosticoUseCase] as BorrarUC
+    }
+
+    package "Query Side (CQRS)" {
+        component [ListarDiagnosticoQuery\n«Query Service»] as ListarQ
+        component [ObtenerDiagnosticoQuery\n«Query Service»] as ObtenerQ
+    }
+
+    package "Decorator Pattern — Cache Transparente" {
+        component [DiagnosticoCacheDecorator\n«Decorator»\nimplements DiagnosticoRepositoryPort] as CacheDecorator
+        component [DiagnosticoJpaAdapter\n«JPA Adapter» — delegate] as JpaAdp
+        component [DiagnosticoRedisAdapter\n«Redis Adapter» — cache] as RedisAdp
+    }
+    CacheDecorator --> JpaAdp : delegate
+    CacheDecorator --> RedisAdp : cache
+
+    package "Adapters Outbound" {
+        component [DiagnosticoCosmosAdapter\n«Cosmos Adapter»] as CosmosAdp
+        component [CieTableAdapter\n«Table Storage Adapter»] as CieAdp
+        component [ServiceBusPublisher\n«Service Bus Adapter»] as SBPub
+    }
+}
+
+database "Azure SQL Database\nWrite Model" as SQL
+database "Azure Cosmos DB\nRead Model" as CosmosDB
+database "Azure Cache for Redis" as RedisDB
+storage "Azure Table Storage\nCatálogo CIE-10" as TableStorage
+queue "Azure Service Bus\nTopics / Subscriptions" as SB
+
+APIM --> Controller
+Controller --> Delegate
+Delegate --> Mapper
+Delegate --> RegistrarUC
+Delegate --> BorrarUC
+Delegate --> ListarQ
+Delegate --> ObtenerQ
+
+RegistrarUC --> CacheDecorator
+BorrarUC --> CacheDecorator
+RegistrarUC --> CieAdp
+RegistrarUC --> CosmosAdp
+BorrarUC --> CosmosAdp
+RegistrarUC --> SBPub
+BorrarUC --> SBPub
+
+JpaAdp --> SQL
+CosmosAdp --> CosmosDB
+RedisAdp --> RedisDB
+CieAdp --> TableStorage
+SBPub --> SB
+
+note right of CacheDecorator
+  Decorator Pattern:
+  Envuelve el JPA Adapter para añadir
+  cache Redis de forma transparente,
+  sin modificar la lógica de negocio.
+end note
+
+@enduml

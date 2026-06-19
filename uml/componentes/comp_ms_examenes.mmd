@@ -1,0 +1,85 @@
+---
+title: HEPAQ — MS Exámenes · Diagrama de Componentes
+---
+flowchart TB
+    APIM([Azure API Management\nGateway])
+
+    subgraph MSExam["MS Exámenes — Spring Boot WebFlux · Java 21"]
+        direction TB
+
+        subgraph API["API Layer"]
+            Controller["ExamenesController\n«REST Controller»"]
+            Delegate["ExamenDelegate\n«Delegate»"]
+            Mapper["ExamenMapper\n«MapStruct»"]
+        end
+
+        subgraph Strat["Strategy Pattern — Procesamiento por Tipo"]
+            StratFactory["ExamenStrategyFactory\n«Factory Method»"]
+            LabStrat["LaboratorioExamenStrategy"]
+            ImgStrat["ImagenExamenStrategy"]
+            EcoStrat["EcografiaExamenStrategy"]
+            StratFactory --> LabStrat
+            StratFactory --> ImgStrat
+            StratFactory --> EcoStrat
+        end
+
+        subgraph UC["Application (Use Cases)"]
+            RegistrarUC["RegistrarExamenUseCase"]
+            EditarUC["EditarExamenUseCase"]
+            CancelarUC["CancelarExamenUseCase"]
+            BorrarUC["BorrarExamenUseCase"]
+        end
+
+        subgraph QRY["Query Side (CQRS)"]
+            ListarQ["ListarExamenQuery\n«Query Service»"]
+            ObtenerQ["ObtenerExamenQuery\n«Query Service»"]
+        end
+
+        subgraph Consumers["Event Consumers"]
+            RegistrarConsumer["RegistrarExamenConsumer\n«Service Bus Consumer»"]
+        end
+
+        subgraph ADP["Adapters Outbound"]
+            JpaAdp["ExamenJpaAdapter\n«JPA Adapter»"]
+            CosmosAdp["ExamenCosmosAdapter\n«Cosmos Adapter»"]
+            RedisAdp["ExamenRedisAdapter\n«Redis Adapter»"]
+            BlobAdp["BlobStorageAdapter\n«Blob Storage Adapter»"]
+            SBPub["ServiceBusPublisher\n«Service Bus Adapter»"]
+        end
+    end
+
+    SQL[("Azure SQL Database\nWrite Model")]
+    CosmosDB[("Azure Cosmos DB\nRead Model")]
+    RedisDB[("Azure Cache for Redis")]
+    Blob[("Azure Blob Storage\nDICOM / PDFs / Imágenes")]
+    SB(["Azure Service Bus\nTopics / Subscriptions"])
+
+    APIM --> Controller
+    Controller --> Delegate
+    Delegate --> Mapper
+    Delegate --> EditarUC
+    Delegate --> CancelarUC
+    Delegate --> BorrarUC
+    Delegate --> ListarQ
+    Delegate --> ObtenerQ
+
+    SB -->|ExamenOrigenEvent| RegistrarConsumer
+    RegistrarConsumer --> RegistrarUC
+
+    RegistrarUC --> StratFactory
+    EditarUC --> JpaAdp
+    RegistrarUC --> JpaAdp
+    CancelarUC --> JpaAdp
+    BorrarUC --> JpaAdp
+    RegistrarUC --> CosmosAdp
+    EditarUC --> CosmosAdp
+    RegistrarUC --> RedisAdp
+    EditarUC --> BlobAdp
+    RegistrarUC --> SBPub
+    CancelarUC --> SBPub
+
+    JpaAdp --> SQL
+    CosmosAdp --> CosmosDB
+    RedisAdp --> RedisDB
+    BlobAdp --> Blob
+    SBPub --> SB

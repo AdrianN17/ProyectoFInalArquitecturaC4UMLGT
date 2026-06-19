@@ -1,0 +1,110 @@
+@startuml HEPAQ_Activity_FlujoCompletoMedico
+
+skinparam backgroundColor #FFFFFF
+skinparam ActivityBackgroundColor #EAF2FF
+skinparam ActivityBorderColor #2980B9
+skinparam ActivityDiamondBackgroundColor #FEF9E7
+skinparam ActivityDiamondBorderColor #F39C12
+skinparam ArrowColor #444444
+skinparam noteBackgroundColor #FFFFCC
+skinparam noteBorderColor #AAAAAA
+skinparam shadowing false
+
+title HEPAQ — Diagrama de Actividad · Flujo Completo de Atención Médica
+
+|Paciente / Digitador|
+start
+:Solicitar cita médica\nvía App Web o Móvil;
+
+|MS Citas|
+:Ejecutar cadena de validaciones\nRENIEC → Seguro → Disponibilidad médica;
+:Seleccionar AgendaStrategy por tipo de cita;
+:Persistir cita en Azure SQL + Cosmos DB;
+:Publicar CitaAgendadaEvent al Service Bus;
+
+|Azure Service Bus|
+:CitaAgendadaEvent\ndistribuido a suscriptores;
+
+|MS Consulta|
+:RegistrarConsultaConsumer\nconsume CitaAgendadaEvent;
+:Crear Consulta en estado PENDIENTE\n[Azure SQL + Cosmos DB];
+
+note right
+  La consulta queda en espera
+  hasta que el médico inicie la atención.
+end note
+
+|Médico|
+:Iniciar atención médica\nConsulta → EN_CURSO;
+:Registrar anamnesis y examen físico;
+:Registrar signos vitales;
+:Registrar plan de tratamiento;
+:Completar consulta → COMPLETADA;
+
+|MS Consulta|
+:Actualizar Consulta COMPLETADA\n[Azure SQL + Cosmos DB];
+
+|Médico|
+if (¿Requiere diagnóstico y/o examen?) then (Sí)
+
+  if (¿Requiere diagnóstico?) then (Sí)
+
+    |Médico|
+    :Seleccionar código CIE-10\ny registrar diagnóstico;
+
+    |MS Diagnósticos|
+    :Validar código CIE-10\nvía Azure Table Storage;
+    :Persistir diagnóstico\nvía DiagnosticoCacheDecorator\n(JPA + Redis);
+    :Sincronizar Read Model\nen Cosmos DB;
+    :Publicar DiagnosticoRegistradoEvent\nal Service Bus;
+
+  else (No)
+  endif
+
+  if (¿Requiere examen médico?) then (Sí)
+
+    |Médico|
+    :Solicitar examen médico;
+
+    |MS Exámenes|
+    :RegistrarExamenConsumer\nconsume evento;
+    :ExamenStrategyFactory selecciona estrategia\nsegún TipoExamen;
+    :Persistir examen en estado PENDIENTE;
+
+    |Médico|
+    :Procesar muestra / análisis\nExamen → EN_PROCESO;
+    :Registrar resultados e interpretación;
+    :Subir adjunto (PDF/DICOM/Imagen)\na Azure Blob Storage\n[URL SAS firmada TTL 15 min];
+
+    |MS Exámenes|
+    :Examen → COMPLETADO;
+    :Publicar ExamenCompletadoEvent\nal Service Bus;
+
+  else (No)
+  endif
+
+else (No)
+endif
+
+|Azure Service Bus|
+:Eventos distribuidos\na MS Notificaciones;
+
+|MS Notificaciones|
+:Consumir evento correspondiente\n(CitaAgendadaConsumer, ExamenCompletadoConsumer,\nDiagnosticoRegistradoConsumer, etc.);
+:GenerarNotificacionUseCase;
+:NotificacionStrategyFactory\nselecciona CompositeNotificacionStrategy;
+
+fork
+  :EmailNotificacionStrategy\nrenderizar plantilla Thymeleaf\nenviar por SMTP / Microsoft 365;
+fork again
+  :SmsNotificacionStrategy\nenviar SMS al paciente;
+end fork
+
+:Persistir resultado de notificación\nen Azure SQL con estado ENVIADA;
+
+|Paciente / Digitador|
+:Recibir notificación\nEmail / SMS con resultado de atención;
+
+stop
+
+@enduml

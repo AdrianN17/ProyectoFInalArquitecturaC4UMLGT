@@ -1,0 +1,41 @@
+---
+title: HEPAQ — Diagrama de Estados · Cita Médica
+---
+stateDiagram-v2
+    [*] --> PENDIENTE : POST /citas\nagendarCita(cmd)
+
+    PENDIENTE --> CONFIRMADA : confirmar()\n[validación OK]
+    PENDIENTE --> CANCELADA : cancelar(motivo)\n[cualquier actor]
+    PENDIENTE --> REPROGRAMADA : reagendar(nuevaFecha)\n[paciente / digitador]
+
+    CONFIRMADA --> CANCELADA : cancelar(motivo)\n[antes de la fecha]
+    CONFIRMADA --> REPROGRAMADA : reagendar(nuevaFecha)\n[antes de la fecha]
+    CONFIRMADA --> ATENDIDA : marcarAtendida()\n[cita completada]
+
+    REPROGRAMADA --> CONFIRMADA : confirmar()\n[nueva fecha validada]
+    REPROGRAMADA --> CANCELADA : cancelar(motivo)
+
+    CANCELADA --> [*]
+    ATENDIDA --> [*]
+
+    note right of PENDIENTE
+        Estado inicial al crear la cita.
+        Aún no fue validada / confirmada
+        por el médico o el sistema.
+    end note
+
+    note right of CONFIRMADA
+        La cita tiene slot confirmado
+        en el Directorio Médico.
+    end note
+
+    note right of REPROGRAMADA
+        La cita fue movida a otra fecha.
+        Pasa por una nueva confirmación.
+    end note
+
+    note right of CANCELADA
+        Estado terminal. Se registra
+        motivo_cancelacion en BD y se
+        notifica al paciente.
+    end note

@@ -1,0 +1,79 @@
+@startuml HEPAQ_MS_Notificaciones_Componentes
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+skinparam ArrowColor #444444
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+title HEPAQ — MS Notificaciones · Diagrama de Componentes\n(Arquitectura 100% Event-Driven)
+
+package "MS Notificaciones — Spring Boot WebFlux · Java 21" {
+
+    package "Event Consumers (Azure Service Bus)" {
+        component [CitaAgendadaConsumer] as CC
+        component [CitaCanceladaConsumer] as CCC
+        component [CitaReagendadaConsumer] as CR
+        component [ConsultaCanceladaConsumer] as ConC
+        component [ExamenCompletadoConsumer] as EC
+        component [DiagnosticoRegistradoConsumer] as DC
+    }
+
+    package "Application (Use Cases)" {
+        component [GenerarNotificacionUseCase] as GenNotifUC
+        component [RetryNotificacionScheduler\n«@Scheduled»] as RetryScheduler
+    }
+
+    package "Composite + Strategy Pattern — Envío Multi-Canal" {
+        component [NotificacionStrategyFactory\n«Factory Method»] as StratFactory
+        component [CompositeNotificacionStrategy\n«Composite»] as Composite
+        component [EmailNotificacionStrategy\n«Strategy»] as EmailStrat
+        component [SmsNotificacionStrategy\n«Strategy»] as SmsStrat
+    }
+    StratFactory --> Composite
+    Composite --> EmailStrat
+    Composite --> SmsStrat
+
+    package "Adapters Outbound" {
+        component [NotificacionJpaAdapter\n«JPA Adapter»] as JpaAdp
+        component [JavaMailAdapter\n«SMTP Adapter»] as MailAdp
+        component [ThymeleafEmailTemplateAdapter\n«Template Adapter»] as ThymAdp
+    }
+}
+
+database "Azure SQL Database\nAuditoría Notificaciones" as SQL
+queue "Azure Service Bus\nTopics / Subscriptions" as SB
+component "SMTP / Microsoft 365\nEmail" as SMTP
+
+SB --> CC : CitaAgendadaEvent
+SB --> CCC : CitaCanceladaEvent
+SB --> CR : CitaReagendadaEvent
+SB --> ConC : ConsultaCanceladaEvent
+SB --> EC : ExamenCompletadoEvent
+SB --> DC : DiagnosticoRegistradoEvent
+
+CC --> GenNotifUC
+CCC --> GenNotifUC
+CR --> GenNotifUC
+ConC --> GenNotifUC
+EC --> GenNotifUC
+DC --> GenNotifUC
+
+GenNotifUC --> StratFactory
+GenNotifUC --> JpaAdp
+RetryScheduler --> GenNotifUC
+
+EmailStrat --> ThymAdp
+EmailStrat --> MailAdp
+
+JpaAdp --> SQL
+MailAdp --> SMTP
+
+note right of Composite
+  Composite Pattern:
+  CompositeNotificacionStrategy agrupa
+  Email + SMS para enviarlos
+  simultáneamente como una sola estrategia.
+end note
+
+@enduml

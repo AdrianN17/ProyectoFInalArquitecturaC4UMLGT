@@ -1,0 +1,140 @@
+@startuml HEPAQ_Seq_RegistrarDiagnostico
+
+skinparam backgroundColor #FFFFFF
+skinparam sequenceArrowThickness 2
+skinparam sequenceGroupBorderColor #999999
+skinparam sequenceGroupBackgroundColor #F5F5F5
+skinparam noteBorderColor #AAAAAA
+skinparam noteBackgroundColor #FFFFCC
+
+title HEPAQ — Secuencia · Registrar Diagnóstico (CIE-10 + Decorator Cache)
+
+actor "Médico" as Medico
+participant "Azure API\nManagement" as APIM
+participant "Diagnosticos\nController" as Controller
+participant "Diagnostico\nDelegate" as Delegate
+participant "Registrar\nDiagnosticoUseCase" as UseCase
+participant "CieTableAdapter" as CieAdp
+database "Azure Table Storage\nCatálogo CIE-10" as TableStorage
+participant "DiagnosticoCache\nDecorator\n«Decorator»" as Decorator
+participant "Diagnostico\nRedisAdapter" as RedisAdp
+database "Azure Cache\nfor Redis" as RedisDB
+participant "Diagnostico\nJpaAdapter" as JpaAdp
+database "Azure SQL\nDatabase" as SQL
+participant "Diagnostico\nCosmosAdapter" as CosmosAdp
+database "Azure Cosmos DB" as CosmosDB
+participant "ServiceBus\nPublisher" as SBPub
+queue "Azure Service Bus" as SB
+
+== Registro de un nuevo Diagnóstico ==
+
+Medico -> APIM : POST /diagnosticos/v1/diagnosticos [Bearer JWT]
+activate APIM
+APIM -> APIM : Validar JWT + verificar rol MEDICO
+APIM -> Controller : registrarDiagnostico(RegistrarDiagnosticoRequest)
+activate Controller
+Controller -> Delegate : registrarDiagnostico(request)
+activate Delegate
+Delegate -> UseCase : ejecutar(RegistrarDiagnosticoCmd)
+activate UseCase
+
+group Validación del código CIE-10
+    UseCase -> CieAdp : obtenerPorCodigo(codigoCIE)
+    activate CieAdp
+    CieAdp -> TableStorage : GET /cie10/{codigo}
+    activate TableStorage
+    TableStorage --> CieAdp : CodigoCIE {codigo, descripcion, categoria}
+    deactivate TableStorage
+    CieAdp --> UseCase : CodigoCIE válido
+    deactivate CieAdp
+end
+
+group Decorator Pattern — Persistencia con cache transparente
+    UseCase -> Decorator : guardar(diagnostico)
+    activate Decorator
+    Decorator -> JpaAdp : guardar(diagnostico)
+    activate JpaAdp
+    JpaAdp -> SQL : INSERT INTO diagnosticos (...) VALUES (...)
+    SQL --> JpaAdp : OK · id generado
+    JpaAdp --> Decorator : Diagnostico persistido
+    deactivate JpaAdp
+    Decorator -> RedisAdp : put(diagnosticoId, diagnostico)
+    activate RedisAdp
+    RedisAdp -> RedisDB : SET diag:{id} TTL=600s
+    RedisDB --> RedisAdp : OK
+    deactivate RedisAdp
+    Decorator --> UseCase : Diagnostico guardado
+    deactivate Decorator
+end
+
+group Sincronización Read Model (CQRS)
+    UseCase -> CosmosAdp : guardar(diagnosticoDocument)
+    activate CosmosAdp
+    CosmosAdp -> CosmosDB : upsert /diagnosticos/{id}
+    CosmosDB --> CosmosAdp : OK
+    deactivate CosmosAdp
+end
+
+group Publicación de Evento de Dominio
+    UseCase -> SBPub : publish(DiagnosticoRegistradoEvent)
+    activate SBPub
+    SBPub -> SB : Message → topic: diagnosticos-registrados
+    SB --> SBPub : ACK
+    deactivate SBPub
+end
+
+UseCase --> Delegate : DiagnosticoDTO
+deactivate UseCase
+Delegate --> Controller : DiagnosticoDTO
+deactivate Delegate
+Controller --> APIM : 201 Created
+deactivate Controller
+APIM --> Medico : 201 Created {diagnosticoId, codigoCIE, estado: ACTIVO}
+deactivate APIM
+
+== Lectura posterior con cache (Decorator) ==
+
+Medico -> APIM : GET /diagnosticos/v1/diagnosticos/{id}
+activate APIM
+APIM -> Controller : obtenerDiagnostico(id)
+activate Controller
+Controller -> Delegate : obtenerDiagnostico(id)
+activate Delegate
+Delegate -> UseCase : obtener(id)
+activate UseCase
+UseCase -> Decorator : obtener(id)
+activate Decorator
+Decorator -> RedisAdp : get(diagnosticoId)
+activate RedisAdp
+RedisAdp -> RedisDB : GET diag:{id}
+
+alt Cache hit
+    RedisDB --> RedisAdp : DiagnosticoEntity (serializado)
+    RedisAdp --> Decorator : DiagnosticoEntity
+    Decorator --> UseCase : Diagnostico (sin tocar SQL)
+else Cache miss
+    RedisDB --> RedisAdp : nil
+    deactivate RedisAdp
+    Decorator -> JpaAdp : obtener(id)
+    activate JpaAdp
+    JpaAdp -> SQL : SELECT * FROM diagnosticos WHERE id = ?
+    SQL --> JpaAdp : DiagnosticoEntity
+    JpaAdp --> Decorator : DiagnosticoEntity
+    deactivate JpaAdp
+    Decorator -> RedisAdp : put(id, entity) TTL=600s
+    activate RedisAdp
+    RedisAdp -> RedisDB : SET diag:{id}
+    deactivate RedisAdp
+    Decorator --> UseCase : Diagnostico
+end
+deactivate Decorator
+UseCase --> Delegate : DiagnosticoDTO
+deactivate UseCase
+Delegate --> Controller : DiagnosticoDTO
+deactivate Delegate
+Controller --> APIM : 200 OK
+deactivate Controller
+APIM --> Medico : 200 OK DiagnosticoDTO
+deactivate APIM
+
+@enduml

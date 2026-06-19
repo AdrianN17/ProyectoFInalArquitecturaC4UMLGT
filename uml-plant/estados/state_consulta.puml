@@ -1,0 +1,43 @@
+@startuml HEPAQ_State_Consulta
+
+skinparam backgroundColor #FFFFFF
+skinparam stateBackgroundColor #EAF2FF
+skinparam stateBorderColor #2980B9
+skinparam stateArrowColor #444444
+skinparam noteBackgroundColor #FFFFCC
+skinparam noteBorderColor #AAAAAA
+skinparam shadowing false
+
+title HEPAQ — Diagrama de Estados · Consulta Médica
+
+[*] --> PENDIENTE : CitaAgendadaEvent recibido\nRegistrarConsultaUseCase
+
+PENDIENTE --> EN_CURSO : médico inicia atención\n[editarConsulta → estado EN_CURSO]
+PENDIENTE --> CANCELADA : cancelarConsulta(motivo)\n[antes de la atención]
+
+EN_CURSO --> COMPLETADA : guardarConsulta()\n[médico completa la atención:\nanamnesis + examen físico + tratamiento]
+EN_CURSO --> CANCELADA : cancelarConsulta(motivo)\n[emergencia / no show]
+
+COMPLETADA --> [*]
+CANCELADA --> [*]
+
+state EN_CURSO {
+    [*] --> RegistrandoAnamnesis : médico inicia consulta
+    RegistrandoAnamnesis --> RegistrandoExamenFisico : anamnesis guardada
+    RegistrandoExamenFisico --> RegistrandoSignosVitales : examen físico registrado
+    RegistrandoSignosVitales --> RegistrandoTratamiento : signos vitales guardados
+    RegistrandoTratamiento --> [*] : tratamiento y plan registrados
+}
+
+state PENDIENTE : Creada automáticamente al recibir CitaAgendadaEvent.\nEspera que el médico inicie la atención.
+state COMPLETADA : La consulta tiene anamnesis, examen físico\ny plan de tratamiento. Puede originar\ndiagnósticos y solicitudes de exámenes.
+state CANCELADA : Publica ConsultaCanceladaEvent al Service Bus\npara notificar al paciente.
+
+note right of COMPLETADA
+  Al completarse la consulta:
+  - el médico puede registrar diagnósticos (CIE-10)
+  - el médico puede solicitar exámenes
+  - ambas acciones originan nuevos eventos
+end note
+
+@enduml

@@ -1,0 +1,80 @@
+@startuml HEPAQ_MS_Consulta_Componentes
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+skinparam ArrowColor #444444
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+title HEPAQ — MS Consulta · Diagrama de Componentes
+
+component "Azure API Management\nGateway" as APIM
+
+package "MS Consulta — Spring Boot WebFlux · Java 21" {
+
+    package "API Layer" {
+        component [ConsultasController\n«REST Controller»] as Controller
+        component [ConsultaDelegate\n«Delegate»] as Delegate
+        component [ConsultaMapper\n«MapStruct»] as Mapper
+    }
+
+    package "Template Method — Flujo de Use Case" {
+        component [ConsultaUseCaseTemplate\n«abstract»\nvalidar → persistir → publicarEvento] as Template
+        component [RegistrarConsultaUseCase] as RegistrarUC
+        component [EditarConsultaUseCase] as EditarUC
+        component [CancelarConsultaUseCase] as CancelarUC
+    }
+    Template <|.. RegistrarUC
+    Template <|.. EditarUC
+    Template <|.. CancelarUC
+
+    package "Query Side (CQRS)" {
+        component [ListarConsultaQuery\n«Query Service»] as ListarQ
+        component [ObtenerConsultaQuery\n«Query Service»] as ObtenerQ
+    }
+
+    package "Event Consumers" {
+        component [RegistrarConsultaConsumer\n«Service Bus Consumer»\nCitaAgendadaEvent] as RegistrarConsumer
+    }
+
+    package "Adapters Outbound" {
+        component [ConsultaJpaAdapter\n«JPA Adapter»] as JpaAdp
+        component [ConsultaCosmosAdapter\n«Cosmos Adapter»] as CosmosAdp
+        component [ConsultaRedisAdapter\n«Redis Adapter»] as RedisAdp
+        component [ServiceBusPublisher\n«Service Bus Adapter»] as SBPub
+    }
+}
+
+database "Azure SQL Database\nWrite Model" as SQL
+database "Azure Cosmos DB\nRead Model" as CosmosDB
+database "Azure Cache for Redis" as RedisDB
+queue "Azure Service Bus\nTopics / Subscriptions" as SB
+
+APIM --> Controller
+Controller --> Delegate
+Delegate --> Mapper
+Delegate --> EditarUC
+Delegate --> CancelarUC
+Delegate --> ListarQ
+Delegate --> ObtenerQ
+
+SB --> RegistrarConsumer : CitaAgendadaEvent
+RegistrarConsumer --> RegistrarUC
+
+RegistrarUC --> JpaAdp
+EditarUC --> JpaAdp
+CancelarUC --> JpaAdp
+RegistrarUC --> CosmosAdp
+EditarUC --> CosmosAdp
+CancelarUC --> CosmosAdp
+RegistrarUC --> RedisAdp
+EditarUC --> RedisAdp
+CancelarUC --> RedisAdp
+CancelarUC --> SBPub
+
+JpaAdp --> SQL
+CosmosAdp --> CosmosDB
+RedisAdp --> RedisDB
+SBPub --> SB
+
+@enduml

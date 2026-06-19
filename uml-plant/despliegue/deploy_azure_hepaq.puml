@@ -1,0 +1,116 @@
+@startuml HEPAQ_Despliegue_Azure
+
+skinparam backgroundColor #FFFFFF
+skinparam nodeBackgroundColor #E8F4FD
+skinparam nodeBorderColor #2980B9
+skinparam databaseBackgroundColor #FEF9E7
+skinparam databaseBorderColor #F39C12
+skinparam queueBackgroundColor #F9EBEA
+skinparam queueBorderColor #E74C3C
+skinparam storageBackgroundColor #EAF7EC
+skinparam storageBorderColor #27AE60
+skinparam ArrowColor #444444
+skinparam shadowing false
+
+title HEPAQ — Diagrama de Despliegue · Microsoft Azure
+
+node "Clientes" as ClientsNode {
+    component [Angular Web App\nNavegador\n(Médico / Digitador)] as WebApp
+    component [Angular + Capacitor\niOS / Android\n(Paciente)] as MobileApp
+}
+
+cloud "Microsoft Azure — Resource Group: hepaq-prod-rg" as Azure {
+
+    package "Identidad y Seguridad" as IdSec {
+        component [Microsoft Entra ID\nOAuth2 / OpenID Connect\nRBAC por roles] as EntraID
+        component [Azure Key Vault\nSecretos · Certificados\nCadenas de conexión] as KeyVault
+    }
+
+    component [Azure API Management\nGateway · Validación JWT\nRate Limiting · Enrutamiento\nDocumentación OpenAPI 3.0] as APIM
+
+    node "Azure Container Apps — Microservicios" as ContainerApps {
+        component [MS Citas\nSpring Boot 3 · Java 21\n:8080] as MSCitas
+        component [MS Consulta\nSpring Boot 3 · Java 21\n:8081] as MSConsulta
+        component [MS Diagnósticos\nSpring Boot 3 · Java 21\n:8082] as MSDiag
+        component [MS Exámenes\nSpring Boot 3 · Java 21\n:8083] as MSExam
+        component [MS Notificaciones\nSpring Boot 3 · Java 21\n:8084] as MSNotif
+    }
+
+    queue "Azure Service Bus\nTopics / Subscriptions\nDead-Letter Queue" as SB
+
+    package "Write Models — Azure SQL Database (CQRS)" as WriteSide {
+        database "db_citas\nAzure SQL" as SQL_Citas
+        database "db_consultas\nAzure SQL" as SQL_Consulta
+        database "db_diagnosticos\nAzure SQL" as SQL_Diag
+        database "db_examenes\nAzure SQL" as SQL_Exam
+        database "db_notificaciones\nAzure SQL" as SQL_Notif
+    }
+
+    database "Azure Cosmos DB\nRead Models (CQRS)\nColecciones por microservicio" as Cosmos
+
+    database "Azure Cache for Redis\nCache-Aside Pattern\nTTL configurable" as Redis
+
+    package "Almacenamiento" as Storage {
+        storage "Azure Blob Storage\nContainer: examenes-adjuntos\nDICOM · PDF · Imágenes · MP4\nURL SAS firmadas (TTL 15 min)" as Blob
+        storage "Azure Table Storage\nCatálogo CIE-10\nSolo lectura" as Table
+    }
+}
+
+package "Sistemas Externos" as External {
+    component [RENIEC API\nValidación DNI] as RENIEC
+    component [EsSalud Seguro\nValidación Cobertura] as Seguro
+    component [Directorio Médico\nDisponibilidad Médicos] as DirMedico
+    component [SMTP / Microsoft 365\nEnvío de emails] as SMTP
+}
+
+WebApp --> APIM : HTTPS / Bearer JWT
+MobileApp --> APIM : HTTPS / Bearer JWT
+WebApp --> EntraID : OAuth2 Auth Code Flow
+MobileApp --> EntraID : OAuth2 PKCE Flow
+APIM --> EntraID : Validate token
+
+APIM --> MSCitas
+APIM --> MSConsulta
+APIM --> MSDiag
+APIM --> MSExam
+
+MSCitas --> SB : CitaAgendadaEvent\nCitaCanceladaEvent\nCitaReagendadaEvent
+MSConsulta --> SB : ConsultaCanceladaEvent
+MSDiag --> SB : DiagnosticoRegistradoEvent
+MSExam --> SB : ExamenRegistradoEvent\nExamenCompletadoEvent
+
+SB --> MSConsulta : CitaAgendadaEvent
+SB --> MSExam : ExamenOrigenEvent
+SB --> MSNotif : Todos los eventos
+
+MSCitas --> SQL_Citas
+MSConsulta --> SQL_Consulta
+MSDiag --> SQL_Diag
+MSExam --> SQL_Exam
+MSNotif --> SQL_Notif
+
+MSCitas --> Cosmos
+MSConsulta --> Cosmos
+MSDiag --> Cosmos
+MSExam --> Cosmos
+
+MSCitas --> Redis
+MSConsulta --> Redis
+MSDiag --> Redis
+MSExam --> Redis
+
+MSExam --> Blob
+MSDiag --> Table
+
+MSCitas --> RENIEC : HTTPS
+MSCitas --> Seguro : HTTPS
+MSCitas --> DirMedico : HTTPS
+MSNotif --> SMTP : SMTP / TLS
+
+MSCitas ..> KeyVault : leer secretos
+MSConsulta ..> KeyVault : leer secretos
+MSDiag ..> KeyVault : leer secretos
+MSExam ..> KeyVault : leer secretos
+MSNotif ..> KeyVault : leer secretos
+
+@enduml

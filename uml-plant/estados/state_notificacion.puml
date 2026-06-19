@@ -1,0 +1,48 @@
+@startuml HEPAQ_State_Notificacion
+
+skinparam backgroundColor #FFFFFF
+skinparam stateBackgroundColor #EAF2FF
+skinparam stateBorderColor #2980B9
+skinparam stateArrowColor #444444
+skinparam noteBackgroundColor #FFFFCC
+skinparam noteBorderColor #AAAAAA
+skinparam shadowing false
+
+title HEPAQ — Diagrama de Estados · Notificación
+
+[*] --> PENDIENTE : GenerarNotificacionUseCase\n[evento recibido del Service Bus\nnotificación creada en BD antes del envío]
+
+PENDIENTE --> ENVIADA : envío exitoso\n[CompositeNotificacionStrategy OK\nSMTP 250 / SMS ACK]
+PENDIENTE --> FALLIDA : error en envío\n[SMTP timeout / SMS error\nintentos_actuales = 1]
+
+FALLIDA --> REINTENTANDO : RetryNotificacionScheduler\n[@Scheduled · backoff exponencial\nintentos_actuales < max_reintentos (default: 3)]
+
+REINTENTANDO --> ENVIADA : reintento exitoso\n[canal disponible]
+REINTENTANDO --> FALLIDA : reintento fallido\n[incrementa intentos_actuales]
+REINTENTANDO --> FALLIDA_DEFINITIVA : máx reintentos alcanzados\n[intentos_actuales >= max_reintentos]
+
+ENVIADA --> [*]
+FALLIDA_DEFINITIVA --> [*]
+
+state PENDIENTE : Se persiste con estado PENDIENTE antes del envío.\nCanal: EMAIL | SMS | PUSH | EMAIL_SMS
+state ENVIADA : fecha_envio registrada.\nSe guarda en notificaciones_intentos con exitoso=1.
+state FALLIDA : Se registra error_mensaje y error_codigo del proveedor.\nQueda en cola para el scheduler de reintentos.
+state REINTENTANDO : Scheduler activa reintento con backoff exponencial:\nintento 1 → 1 min · intento 2 → 5 min · intento 3 → 15 min
+state FALLIDA_DEFINITIVA : Máximo de reintentos superado.\nRequiere intervención manual.\nSe registra en notificaciones_intentos con exitoso=0.
+
+note right of REINTENTANDO
+  Backoff exponencial configurable:
+  - max_reintentos: 3 (default por notificación)
+  - Cada intento se registra en notificaciones_intentos
+  - error_codigo y proveedor_response se persisten
+  - La estrategia ADR-032 define el comportamiento
+end note
+
+note right of FALLIDA_DEFINITIVA
+  Estado terminal de fallo.
+  El equipo de soporte debe revisar
+  los registros en notificaciones_intentos
+  para identificar la causa raíz.
+end note
+
+@enduml

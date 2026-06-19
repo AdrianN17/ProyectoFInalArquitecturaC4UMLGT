@@ -1,0 +1,134 @@
+@startuml HEPAQ_Seq_AgendarCita
+
+skinparam backgroundColor #FFFFFF
+skinparam sequenceArrowThickness 2
+skinparam sequenceGroupBorderColor #999999
+skinparam sequenceGroupBackgroundColor #F5F5F5
+skinparam noteBorderColor #AAAAAA
+skinparam noteBackgroundColor #FFFFCC
+
+title HEPAQ — Secuencia · Agendar Cita Médica
+
+actor "Paciente / Digitador" as Paciente
+participant "Azure API\nManagement" as APIM
+participant "CitasController" as Controller
+participant "CitaDelegate" as Delegate
+participant "AgendarCita\nUseCase" as UseCase
+participant "Reniec\nValidacionHandler" as RH
+participant "Seguro\nValidacionHandler" as SH
+participant "Disponibilidad\nMedicoHandler" as DH
+participant "RENIEC API" as RENIEC
+participant "EsSalud\nSeguro" as Seguro
+participant "Directorio\nMédico" as DirMed
+participant "MedicosRedis\nAdapter" as MedRedis
+participant "AgendaStrategy\nFactory" as Factory
+participant "AgendaStrategy" as Strategy
+participant "CitaJpaAdapter" as JPA
+database "Azure SQL\nDatabase" as SQL
+participant "CitaCosmos\nAdapter" as Cosmos
+database "Azure Cosmos DB" as CosmosDB
+participant "CitaRedisAdapter" as Redis
+database "Azure Cache\nfor Redis" as RedisDB
+participant "ServiceBus\nPublisher" as SBPub
+queue "Azure Service Bus" as SB
+
+Paciente -> APIM : POST /citas/v1/citas [Bearer JWT]
+activate APIM
+APIM -> APIM : Validar JWT con Microsoft Entra ID
+APIM -> Controller : agendarCita(AgendarCitaRequest)
+activate Controller
+Controller -> Delegate : agendarCita(request)
+activate Delegate
+Delegate -> UseCase : ejecutar(AgendarCitaCmd)
+activate UseCase
+
+group Chain of Responsibility — Validaciones en cadena
+    UseCase -> RH : validar(cita)
+    activate RH
+    RH -> RENIEC : GET /personas/{dni}
+    activate RENIEC
+    RENIEC --> RH : 200 OK · Persona válida
+    deactivate RENIEC
+    RH -> SH : validar(cita)
+    activate SH
+    SH -> Seguro : GET /asegurados/{pacienteId}/cobertura
+    activate Seguro
+    Seguro --> SH : 200 OK · Cobertura activa
+    deactivate Seguro
+    SH -> DH : validar(cita)
+    activate DH
+    DH -> MedRedis : obtenerDisponibilidad(medicoId, fecha)
+    activate MedRedis
+    alt Cache hit en Redis
+        MedRedis -> RedisDB : GET medicos:{medicoId}
+        RedisDB --> MedRedis : Datos del médico
+    else Cache miss
+        MedRedis -> DirMed : GET /medicos/{id}/disponibilidad
+        activate DirMed
+        DirMed --> MedRedis : 200 OK · Slot disponible
+        deactivate DirMed
+        MedRedis -> RedisDB : SET medicos:{medicoId} TTL=300s
+    end
+    MedRedis --> DH : Disponibilidad confirmada
+    deactivate MedRedis
+    DH --> UseCase : Cadena de validaciones OK
+    deactivate DH
+    deactivate SH
+    deactivate RH
+end
+
+group Strategy Pattern — Selección de estrategia por tipo de cita
+    UseCase -> Factory : obtener(TipoCita)
+    activate Factory
+    Factory --> UseCase : ConsultaMedicaStrategy / LaboratorioStrategy / EcografiaStrategy
+    deactivate Factory
+    UseCase -> Strategy : validar(cita)
+    UseCase -> Strategy : reservar(cita)
+    activate Strategy
+    Strategy --> UseCase : Cita con slot confirmado
+    deactivate Strategy
+end
+
+group Persistencia Write Model (CQRS)
+    UseCase -> JPA : guardar(cita)
+    activate JPA
+    JPA -> SQL : INSERT INTO citas (...) VALUES (...)
+    SQL --> JPA : OK · id generado
+    JPA --> UseCase : Cita persistida
+    deactivate JPA
+end
+
+group Sincronización Read Model (CQRS)
+    UseCase -> Cosmos : guardar(citaDocument)
+    activate Cosmos
+    Cosmos -> CosmosDB : upsert /citas/{id}
+    CosmosDB --> Cosmos : OK
+    deactivate Cosmos
+end
+
+group Invalidación de Cache
+    UseCase -> Redis : invalidar(pacienteId)
+    activate Redis
+    Redis -> RedisDB : DEL citas:paciente:{id}
+    RedisDB --> Redis : OK
+    deactivate Redis
+end
+
+group Publicación de Evento de Dominio
+    UseCase -> SBPub : publish(CitaAgendadaEvent)
+    activate SBPub
+    SBPub -> SB : Message → topic: citas-agendadas
+    SB --> SBPub : ACK
+    deactivate SBPub
+end
+
+UseCase --> Delegate : CitaDTO {id, estado: PENDIENTE}
+deactivate UseCase
+Delegate --> Controller : CitaDTO
+deactivate Delegate
+Controller --> APIM : 201 Created
+deactivate Controller
+APIM --> Paciente : 201 Created {citaId, estado: PENDIENTE}
+deactivate APIM
+
+@enduml

@@ -1,0 +1,48 @@
+@startuml HEPAQ_State_Cita
+
+skinparam backgroundColor #FFFFFF
+skinparam stateBackgroundColor #EAF2FF
+skinparam stateBorderColor #2980B9
+skinparam stateArrowColor #444444
+skinparam noteBackgroundColor #FFFFCC
+skinparam noteBorderColor #AAAAAA
+skinparam shadowing false
+
+title HEPAQ — Diagrama de Estados · Cita Médica
+
+[*] --> PENDIENTE : POST /citas\nagendarCita(cmd)
+
+PENDIENTE --> CONFIRMADA : confirmar()\n[validación OK]
+PENDIENTE --> CANCELADA : cancelar(motivo)\n[cualquier actor autorizado]
+PENDIENTE --> REPROGRAMADA : reagendar(nuevaFecha)\n[paciente / digitador]
+
+CONFIRMADA --> CANCELADA : cancelar(motivo)\n[antes de la fecha de cita]
+CONFIRMADA --> REPROGRAMADA : reagendar(nuevaFecha)\n[antes de la fecha de cita]
+CONFIRMADA --> ATENDIDA : marcarAtendida()\n[cita completada]
+
+REPROGRAMADA --> CONFIRMADA : confirmar()\n[nueva fecha validada]
+REPROGRAMADA --> CANCELADA : cancelar(motivo)
+
+CANCELADA --> [*]
+ATENDIDA --> [*]
+
+state PENDIENTE : Estado inicial al crear la cita.\nAún no fue validada ni confirmada.
+state CONFIRMADA : Slot confirmado en Directorio Médico.\nCitaAgendadaEvent publicado al Service Bus.
+state REPROGRAMADA : La cita fue movida a otra fecha.\nRequiere una nueva confirmación.
+state CANCELADA : Estado terminal. Se registra motivo_cancelacion.\nSe notifica al paciente vía MS Notificaciones.
+state ATENDIDA : La consulta médica fue realizada.\nEl médico inició la atención.
+
+note right of CANCELADA
+  Al entrar en CANCELADA:
+  - se registra motivo_cancelacion en BD
+  - se publica CitaCanceladaEvent
+  - MS Notificaciones envía Email/SMS al paciente
+end note
+
+note right of REPROGRAMADA
+  Al reagendar se vuelve a validar
+  disponibilidad del médico y cobertura
+  del seguro del paciente.
+end note
+
+@enduml

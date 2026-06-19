@@ -1,0 +1,125 @@
+@startuml HEPAQ_Seq_EnviarNotificacion
+
+skinparam backgroundColor #FFFFFF
+skinparam sequenceArrowThickness 2
+skinparam sequenceGroupBorderColor #999999
+skinparam sequenceGroupBackgroundColor #F5F5F5
+skinparam noteBorderColor #AAAAAA
+skinparam noteBackgroundColor #FFFFCC
+
+title HEPAQ — Secuencia · Enviar Notificación Multi-Canal (Composite Strategy)
+
+queue "Azure Service Bus" as SB
+participant "CitaAgendada\nConsumer" as Consumer
+participant "Generar\nNotificacionUseCase" as UseCase
+participant "Notificacion\nStrategyFactory" as Factory
+participant "CompositeNotificacion\nStrategy\n«Composite»" as Composite
+participant "EmailNotificacion\nStrategy" as EmailStrat
+participant "SmsNotificacion\nStrategy" as SmsStrat
+participant "Thymeleaf\nEmailTemplateAdapter" as Thymeleaf
+participant "JavaMailAdapter" as MailAdp
+component "SMTP\nMicrosoft 365" as SMTP
+participant "Notificacion\nJpaAdapter" as JpaAdp
+database "Azure SQL\nDatabase" as SQL
+participant "RetryNotificacion\nScheduler" as Scheduler
+
+== Flujo principal — Notificación por CitaAgendada ==
+
+SB -> Consumer : CitaAgendadaEvent\n{pacienteId, destinatarioEmail, tipo: CITA_AGENDADA}
+activate Consumer
+Consumer -> UseCase : ejecutar(GenerarNotificacionCmd)
+activate UseCase
+
+UseCase -> JpaAdp : guardar(notificacion{estado: PENDIENTE})
+activate JpaAdp
+JpaAdp -> SQL : INSERT INTO notificaciones (..., estado='PENDIENTE')
+SQL --> JpaAdp : OK · id generado
+deactivate JpaAdp
+
+group Composite Pattern — Envío por múltiples canales simultáneamente
+    UseCase -> Factory : obtener(CITA_AGENDADA, canales: [EMAIL, SMS])
+    activate Factory
+    Factory --> UseCase : CompositeNotificacionStrategy [Email + SMS]
+    deactivate Factory
+
+    UseCase -> Composite : enviar(notificacion)
+    activate Composite
+
+    group Canal 1 — Email con plantilla Thymeleaf
+        Composite -> EmailStrat : enviar(notificacion)
+        activate EmailStrat
+        EmailStrat -> Thymeleaf : construir(CITA_AGENDADA_EMAIL, {paciente, medico, fecha})
+        activate Thymeleaf
+        Thymeleaf --> EmailStrat : HTML renderizado
+        deactivate Thymeleaf
+        EmailStrat -> MailAdp : enviar(destinatario, asunto, htmlBody)
+        activate MailAdp
+        MailAdp -> SMTP : SMTP AUTH LOGIN → SEND MESSAGE
+        activate SMTP
+        SMTP --> MailAdp : 250 OK · Message accepted
+        deactivate SMTP
+        MailAdp --> EmailStrat : Enviado OK
+        deactivate MailAdp
+        EmailStrat --> Composite : OK
+        deactivate EmailStrat
+    end
+
+    group Canal 2 — SMS
+        Composite -> SmsStrat : enviar(notificacion)
+        activate SmsStrat
+        SmsStrat --> Composite : Enviado OK
+        deactivate SmsStrat
+    end
+
+    Composite --> UseCase : Todos los canales OK
+    deactivate Composite
+end
+
+UseCase -> JpaAdp : actualizar(notificacion{estado: ENVIADA, fechaEnvio: now()})
+activate JpaAdp
+JpaAdp -> SQL : UPDATE notificaciones SET estado='ENVIADA', fecha_envio=? WHERE id=?
+SQL --> JpaAdp : OK
+deactivate JpaAdp
+UseCase -> JpaAdp : guardarIntento(notificacionIntento{exitoso: true})
+activate JpaAdp
+JpaAdp -> SQL : INSERT INTO notificaciones_intentos (..., exitoso=1)
+SQL --> JpaAdp : OK
+deactivate JpaAdp
+
+deactivate UseCase
+deactivate Consumer
+
+== Flujo alternativo — Reintento automático con backoff exponencial ==
+
+Scheduler -> JpaAdp : listarFallidas(intentos < max_reintentos)
+activate Scheduler
+activate JpaAdp
+JpaAdp -> SQL : SELECT * FROM notificaciones\nWHERE estado='FALLIDA' AND intentos_actuales < max_reintentos
+SQL --> JpaAdp : [notificaciones fallidas]
+JpaAdp --> Scheduler : Lista de notificaciones
+deactivate JpaAdp
+
+loop Por cada notificación fallida
+    Scheduler -> JpaAdp : actualizar(estado: REINTENTANDO)
+    activate JpaAdp
+    JpaAdp -> SQL : UPDATE notificaciones SET estado='REINTENTANDO'
+    deactivate JpaAdp
+    Scheduler -> UseCase : ejecutar(GenerarNotificacionCmd) con backoff exponencial
+    activate UseCase
+    alt Reintento exitoso
+        UseCase -> JpaAdp : actualizar(estado: ENVIADA)
+        activate JpaAdp
+        JpaAdp -> SQL : UPDATE notificaciones SET estado='ENVIADA'
+        deactivate JpaAdp
+    else Máx reintentos alcanzados
+        UseCase -> JpaAdp : actualizar(estado: FALLIDA definitiva)
+        activate JpaAdp
+        JpaAdp -> SQL : UPDATE notificaciones SET estado='FALLIDA'
+        deactivate JpaAdp
+    end
+    deactivate UseCase
+end
+
+deactivate Scheduler
+
+@enduml

@@ -1,0 +1,123 @@
+@startuml HEPAQ_Seq_RegistrarConsulta
+
+skinparam backgroundColor #FFFFFF
+skinparam sequenceArrowThickness 2
+skinparam sequenceGroupBorderColor #999999
+skinparam sequenceGroupBackgroundColor #F5F5F5
+skinparam noteBorderColor #AAAAAA
+skinparam noteBackgroundColor #FFFFCC
+
+title HEPAQ — Secuencia · Registrar y Gestionar Consulta Médica
+
+queue "Azure Service Bus" as SB
+participant "Registrar\nConsultaConsumer" as Consumer
+participant "Registrar\nConsultaUseCase\n(Template Method)" as RegistrarUC
+participant "Consulta\nJpaAdapter" as JPA
+database "Azure SQL\nDatabase" as SQL
+participant "Consulta\nCosmosAdapter" as Cosmos
+database "Azure Cosmos DB" as CosmosDB
+participant "Consulta\nRedisAdapter" as Redis
+database "Azure Cache\nfor Redis" as RedisDB
+participant "ServiceBus\nPublisher" as SBPub
+
+actor "Médico" as Medico
+participant "Azure API\nManagement" as APIM
+participant "Consultas\nController" as Controller
+participant "Consulta\nDelegate" as Delegate
+participant "Editar\nConsultaUseCase\n(Template Method)" as EditarUC
+participant "Cancelar\nConsultaUseCase\n(Template Method)" as CancelarUC
+
+== Fase 1 — Creación automática por evento (Event-Driven) ==
+
+SB -> Consumer : CitaAgendadaEvent\n{citaId, pacienteId, medicoId, fechaHora, tipo}
+activate Consumer
+Consumer -> RegistrarUC : ejecutar(RegistrarConsultaCmd)
+activate RegistrarUC
+
+note over RegistrarUC : Template Method:\nvalidar → persistir → publicarEvento
+
+RegistrarUC -> RegistrarUC : validar(cmd) — verifica citaId único
+RegistrarUC -> JPA : guardar(consulta{estado: PENDIENTE})
+activate JPA
+JPA -> SQL : INSERT INTO consultas (...)
+SQL --> JPA : OK
+deactivate JPA
+RegistrarUC -> Cosmos : guardar(consultaDocument)
+activate Cosmos
+Cosmos -> CosmosDB : upsert /consultas/{id}
+CosmosDB --> Cosmos : OK
+deactivate Cosmos
+RegistrarUC -> Redis : invalidar(pacienteId)
+activate Redis
+Redis -> RedisDB : DEL consultas:paciente:{id}
+deactivate Redis
+deactivate RegistrarUC
+deactivate Consumer
+
+== Fase 2 — Médico edita la consulta durante la atención ==
+
+Medico -> APIM : PUT /consultas/v1/consultas/{id} [Bearer JWT]
+activate APIM
+APIM -> Controller : editarConsulta(id, EditarConsultaRequest)
+activate Controller
+Controller -> Delegate : editarConsulta(id, request)
+activate Delegate
+Delegate -> EditarUC : ejecutar(EditarConsultaCmd)
+activate EditarUC
+
+note over EditarUC : Template Method:\nvalidar → persistir → publicarEvento
+
+EditarUC -> EditarUC : validar(cmd) — verifica estado EN_CURSO
+EditarUC -> JPA : actualizar(consulta{anamnesis, exFisico, tratamiento, estado: COMPLETADA})
+activate JPA
+JPA -> SQL : UPDATE consultas SET ... WHERE id = ?
+SQL --> JPA : OK
+deactivate JPA
+EditarUC -> Cosmos : actualizar(consultaDocument)
+activate Cosmos
+Cosmos -> CosmosDB : upsert /consultas/{id}
+deactivate Cosmos
+EditarUC -> Redis : invalidar(consultaId)
+activate Redis
+Redis -> RedisDB : DEL consultas:{id}
+deactivate Redis
+EditarUC --> Delegate : ConsultaDTO
+deactivate EditarUC
+Delegate --> Controller : ConsultaDTO
+deactivate Delegate
+Controller --> APIM : 200 OK
+deactivate Controller
+APIM --> Medico : 200 OK {consultaId, estado: COMPLETADA}
+deactivate APIM
+
+== Fase 3 (alternativa) — Médico cancela la consulta ==
+
+Medico -> APIM : DELETE /consultas/v1/consultas/{id} [Bearer JWT]
+activate APIM
+APIM -> Controller : cancelarConsulta(id, motivo)
+activate Controller
+Controller -> Delegate : cancelarConsulta(id, motivo)
+activate Delegate
+Delegate -> CancelarUC : ejecutar(CancelarConsultaCmd)
+activate CancelarUC
+CancelarUC -> CancelarUC : validar(cmd) — verifica estado no COMPLETADA
+CancelarUC -> JPA : actualizar(consulta{estado: CANCELADA, motivo})
+activate JPA
+JPA -> SQL : UPDATE consultas SET estado='CANCELADA' WHERE id = ?
+SQL --> JPA : OK
+deactivate JPA
+CancelarUC -> Cosmos : actualizar(consultaDocument)
+CancelarUC -> SBPub : publish(ConsultaCanceladaEvent)
+activate SBPub
+SBPub -> SB : Message → topic: consultas-canceladas
+SB --> SBPub : ACK
+deactivate SBPub
+CancelarUC --> Delegate : ConsultaDTO
+deactivate CancelarUC
+Controller --> APIM : 200 OK
+deactivate Controller
+deactivate Delegate
+APIM --> Medico : 200 OK {estado: CANCELADA}
+deactivate APIM
+
+@enduml

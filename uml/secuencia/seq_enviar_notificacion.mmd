@@ -1,0 +1,82 @@
+---
+title: HEPAQ — Secuencia · Enviar Notificación Multi-Canal (Composite Strategy)
+---
+sequenceDiagram
+    participant SB as Azure Service Bus
+    participant Consumer as CitaAgendadaConsumer
+    participant UseCase as GenerarNotificacionUseCase
+    participant Factory as NotificacionStrategyFactory
+    participant Composite as CompositeNotificacionStrategy
+    participant EmailStrat as EmailNotificacionStrategy
+    participant SmsStrat as SmsNotificacionStrategy
+    participant Thymeleaf as ThymeleafEmailTemplateAdapter
+    participant MailAdp as JavaMailAdapter
+    participant SMTP as SMTP Microsoft 365
+    participant JpaAdp as NotificacionJpaAdapter
+    participant SQL as Azure SQL Database
+    participant Scheduler as RetryNotificacionScheduler
+
+    Note over SB,SQL: Flujo principal — Notificación por CitaAgendada
+
+    SB->>Consumer: CitaAgendadaEvent {pacienteId, destinatarioEmail, tipo: CITA_AGENDADA}
+    activate Consumer
+    Consumer->>UseCase: ejecutar(GenerarNotificacionCmd)
+
+    Note over UseCase,SQL: Guardar notificación en estado PENDIENTE primero
+
+    UseCase->>JpaAdp: guardar(notificacion{estado: PENDIENTE})
+    JpaAdp->>SQL: INSERT INTO notificaciones (..., estado='PENDIENTE')
+    SQL-->>JpaAdp: OK · id generado
+
+    Note over UseCase,Factory: Composite Pattern — Envío por múltiples canales
+
+    UseCase->>Factory: obtener(TipoNotificacion.CITA_AGENDADA, canales: [EMAIL, SMS])
+    Factory-->>UseCase: CompositeNotificacionStrategy [Email + SMS]
+
+    UseCase->>Composite: enviar(notificacion)
+    activate Composite
+
+    Note over Composite,SMTP: Canal 1 — Email con plantilla Thymeleaf
+
+    Composite->>EmailStrat: enviar(notificacion)
+    activate EmailStrat
+    EmailStrat->>Thymeleaf: construir(CITA_AGENDADA_EMAIL, {paciente, medico, fecha, lugar})
+    Thymeleaf-->>EmailStrat: HTML renderizado
+    EmailStrat->>MailAdp: enviar(destinatario, asunto, htmlBody)
+    MailAdp->>SMTP: SMTP AUTH LOGIN → SEND MESSAGE
+    SMTP-->>MailAdp: 250 OK · Message accepted
+    MailAdp-->>EmailStrat: Enviado OK
+    deactivate EmailStrat
+
+    Note over Composite,SmsStrat: Canal 2 — SMS (si el paciente tiene teléfono registrado)
+
+    Composite->>SmsStrat: enviar(notificacion)
+    SmsStrat-->>Composite: Enviado OK
+    deactivate Composite
+
+    Note over UseCase,SQL: Actualizar estado a ENVIADA y registrar intento
+
+    UseCase->>JpaAdp: actualizar(notificacion{estado: ENVIADA, fechaEnvio: now()})
+    JpaAdp->>SQL: UPDATE notificaciones SET estado='ENVIADA', fecha_envio=? WHERE id=?
+    SQL-->>JpaAdp: OK
+    UseCase->>JpaAdp: guardarIntento(notificacionIntento{exitoso: true})
+    JpaAdp->>SQL: INSERT INTO notificaciones_intentos (..., exitoso=1)
+    deactivate Consumer
+
+    Note over Scheduler,SQL: Flujo alternativo — Reintento automático por error
+
+    Scheduler->>JpaAdp: listarFallidas(maxReintentos: 3)
+    JpaAdp->>SQL: SELECT * FROM notificaciones WHERE estado='FALLIDA' AND intentos_actuales < max_reintentos
+    SQL-->>JpaAdp: [notificaciones fallidas]
+    JpaAdp-->>Scheduler: Lista de notificaciones a reintentar
+
+    loop Por cada notificación fallida
+        Scheduler->>JpaAdp: actualizar(notificacion{estado: REINTENTANDO})
+        JpaAdp->>SQL: UPDATE notificaciones SET estado='REINTENTANDO'
+        Scheduler->>UseCase: ejecutar(GenerarNotificacionCmd) con backoff exponencial
+        alt Reintento exitoso
+            UseCase->>JpaAdp: actualizar(estado: ENVIADA)
+        else Máx reintentos alcanzados
+            UseCase->>JpaAdp: actualizar(estado: FALLIDA definitiva)
+        end
+    end

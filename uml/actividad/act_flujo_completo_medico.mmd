@@ -1,0 +1,64 @@
+---
+title: HEPAQ — Diagrama de Actividad · Flujo Completo de Atención Médica
+---
+flowchart TD
+    Inicio([Inicio]) --> AgendarCita
+
+    subgraph FA["Fase 1 · Agendamiento"]
+        AgendarCita["Paciente / Digitador\nagenda cita médica"] --> ValidarCadena["Cadena de validaciones\nRENIEC → Seguro → Médico"]
+        ValidarCadena --> PersistirCita["Persistir cita\nAzure SQL + Cosmos DB"]
+        PersistirCita --> PublicarCitaEvent["Publicar CitaAgendadaEvent\nAzure Service Bus"]
+    end
+
+    PublicarCitaEvent --> SBCita["Azure Service Bus"]
+
+    subgraph FC["Fase 2 · Consulta (Event-Driven)"]
+        SBCita -->|CitaAgendadaEvent| CrearConsulta["MS Consulta crea\nConsulta en estado PENDIENTE"]
+        CrearConsulta --> EsperarMedico["Esperar atención del Médico"]
+        EsperarMedico --> MedicoAtiende["Médico inicia atención\nConsulta → EN_CURSO"]
+        MedicoAtiende --> RegistrarAnamnesis["Registrar anamnesis\nexamen físico · signos vitales"]
+        RegistrarAnamnesis --> RegistrarTratamiento["Registrar tratamiento\nConsulta → COMPLETADA"]
+    end
+
+    RegistrarTratamiento --> DecisionMedica{¿Requiere\ndiagnóstico\ny/o examen?}
+    DecisionMedica -->|Solo diagnóstico| PathDiag
+    DecisionMedica -->|Solo examen| PathExam
+    DecisionMedica -->|Ambos| PathAmbos
+
+    subgraph PathAmbos["Flujo paralelo"]
+        PathDiagP["Registrar\nDiagnóstico"] & PathExamP["Solicitar\nExamen"]
+    end
+
+    subgraph FD["Fase 3A · Diagnóstico"]
+        PathDiag["Médico registra diagnóstico\ncon código CIE-10"]
+        PathDiag --> ValidarCIE["Validar código CIE-10\nAzure Table Storage"]
+        ValidarCIE --> PersistirDiag["Persistir diagnóstico\nDecorator Cache + Azure SQL"]
+        PersistirDiag --> PublicarDiagEvent["Publicar DiagnosticoRegistradoEvent"]
+    end
+
+    subgraph FE["Fase 3B · Examen"]
+        PathExam["Solicitar examen médico\nEjemplo: laboratorio"]
+        PathExam --> SeleccionarStrategy["ExamenStrategyFactory\nselecciona estrategia por tipo"]
+        SeleccionarStrategy --> ProcesarExamen["Procesar examen\nLaboratorio / Imagen / Ecografía"]
+        ProcesarExamen --> EsperarResultado["Esperar resultado\nExamen → EN_PROCESO"]
+        EsperarResultado --> SubirAdjunto["Subir adjunto\nAzure Blob Storage\nURL SAS firmada"]
+        SubirAdjunto --> RegistrarResultado["Registrar resultado\nExamen → COMPLETADO"]
+        RegistrarResultado --> PublicarExamEvent["Publicar ExamenCompletadoEvent"]
+    end
+
+    PathDiagP --> PathDiag
+    PathExamP --> PathExam
+
+    PublicarDiagEvent --> SBNotif["Azure Service Bus\n(Notificaciones)"]
+    PublicarExamEvent --> SBNotif
+
+    subgraph FN["Fase 4 · Notificaciones (Event-Driven)"]
+        SBNotif -->|DiagnosticoRegistradoEvent\nExamenCompletadoEvent\nCitaAgendadaEvent| NotifConsumer["MS Notificaciones\nconsume evento"]
+        NotifConsumer --> GenerarNotif["GenerarNotificacionUseCase\nselecciona plantilla Thymeleaf"]
+        GenerarNotif --> CompositeStrat["CompositeNotificacionStrategy\nEmail + SMS simultáneo"]
+        CompositeStrat --> EnviarEmail["JavaMailAdapter\nenvía email SMTP"]
+        CompositeStrat --> EnviarSMS["SmsNotificacionStrategy\nenvía SMS"]
+        EnviarEmail & EnviarSMS --> RegistrarAuditoria["Registrar en BD\nestado: ENVIADA"]
+    end
+
+    RegistrarAuditoria --> Fin([Fin · Atención completada])

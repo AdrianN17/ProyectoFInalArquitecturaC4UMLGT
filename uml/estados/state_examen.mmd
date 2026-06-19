@@ -1,0 +1,43 @@
+---
+title: HEPAQ — Diagrama de Estados · Examen Médico
+---
+stateDiagram-v2
+    [*] --> PENDIENTE : RegistrarExamenUseCase\n[ExamenOrigenEvent recibido\nExamenProcesadorStrategy seleccionada]
+
+    PENDIENTE --> EN_PROCESO : médico inicia procesamiento\n[editarExamen → estado EN_PROCESO]
+    PENDIENTE --> CANCELADO : cancelarExamen(motivo)\n[CancelarExamenUseCase]
+
+    EN_PROCESO --> COMPLETADO : registrarResultado()\n[editarExamen con resultados\n+ adjunto subido a Blob Storage]
+    EN_PROCESO --> CANCELADO : cancelarExamen(motivo)
+
+    COMPLETADO --> ELIMINADO : borrarExamen(motivo)\n[BorrarExamenUseCase · soft delete]
+    CANCELADO --> ELIMINADO : borrarExamen(motivo)
+
+    ELIMINADO --> [*]
+
+    state EN_PROCESO {
+        [*] --> ProcesandoMuestra
+        ProcesandoMuestra --> AnalizandoResultados : muestra procesada
+        AnalizandoResultados --> SubiendoAdjunto : análisis completado
+        SubiendoAdjunto --> [*] : adjunto en Azure Blob Storage
+    }
+
+    note right of PENDIENTE
+        Creado por RegistrarExamenConsumer
+        al recibir evento del Service Bus.
+        La estrategia de procesamiento se
+        selecciona según TipoExamen.
+    end note
+
+    note right of COMPLETADO
+        Resultados registrados + adjunto
+        almacenado en Azure Blob Storage.
+        Se publica ExamenCompletadoEvent.
+        URL SAS generada (15 min TTL).
+    end note
+
+    note right of ELIMINADO
+        Soft delete: adjuntos en Blob
+        se mantienen. Solo se marca
+        activo=0 en adjuntos_examen.
+    end note

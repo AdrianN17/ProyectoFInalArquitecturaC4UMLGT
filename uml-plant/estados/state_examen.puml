@@ -1,0 +1,45 @@
+@startuml HEPAQ_State_Examen
+
+skinparam backgroundColor #FFFFFF
+skinparam stateBackgroundColor #EAF2FF
+skinparam stateBorderColor #2980B9
+skinparam stateArrowColor #444444
+skinparam noteBackgroundColor #FFFFCC
+skinparam noteBorderColor #AAAAAA
+skinparam shadowing false
+
+title HEPAQ — Diagrama de Estados · Examen Médico
+
+[*] --> PENDIENTE : RegistrarExamenUseCase\n[ExamenOrigenEvent recibido desde Service Bus\nExamenProcesadorStrategy seleccionada por tipo]
+
+PENDIENTE --> EN_PROCESO : médico inicia procesamiento\n[editarExamen → estado EN_PROCESO]
+PENDIENTE --> CANCELADO : cancelarExamen(motivo)\n[CancelarExamenUseCase]
+
+EN_PROCESO --> COMPLETADO : registrarResultado()\n[editarExamen con resultados + adjunto subido\na Azure Blob Storage]
+EN_PROCESO --> CANCELADO : cancelarExamen(motivo)
+
+COMPLETADO --> ELIMINADO : borrarExamen(motivo)\n[BorrarExamenUseCase · soft delete]
+CANCELADO --> ELIMINADO : borrarExamen(motivo)
+
+ELIMINADO --> [*]
+
+state EN_PROCESO {
+    [*] --> ProcesandoMuestra : muestra / solicitud recibida
+    ProcesandoMuestra --> AnalizandoResultados : muestra procesada
+    AnalizandoResultados --> SubiendoAdjunto : análisis completado
+    SubiendoAdjunto --> [*] : adjunto en Azure Blob Storage
+}
+
+state PENDIENTE : Creado por RegistrarExamenConsumer al recibir evento.\nLa estrategia de procesamiento se selecciona según TipoExamen:\nLABORATORIO / IMAGEN / ECOGRAFIA / RAYOS_X / TOMOGRAFIA / RESONANCIA
+state COMPLETADO : Resultados registrados + adjunto almacenado\nen Azure Blob Storage. URL SAS generada (TTL 15 min).\nSe publica ExamenCompletadoEvent.
+state ELIMINADO : Soft delete: adjuntos en Blob Storage se mantienen.\nSolo se marca activo=0 en la tabla adjuntos_examen.
+
+note right of COMPLETADO
+  Al completarse el examen:
+  - se persisten resultados e interpretación en Azure SQL
+  - los adjuntos (PDF/DICOM/imagen) quedan en Blob Storage
+  - se genera URL SAS firmada de 15 minutos para acceso
+  - se publica ExamenCompletadoEvent → MS Notificaciones
+end note
+
+@enduml
