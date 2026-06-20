@@ -322,6 +322,7 @@ Diagramas de clases PlantUML que modelan el dominio, use cases, puertos, adaptad
 |---|---|---|---|
 | **Microsoft Entra ID** | Identidad (SaaS) | 1 tenant compartido | P1 (MFA incluido) |
 | **Azure API Management** | API Gateway (PaaS) | 1 instancia | Standard |
+| **Azure Container Apps** | Compute — Contenedores (PaaS) | 1 entorno / **5 container apps** (una por MS) | Consumption (escala a cero) |
 | **Azure SQL Database** | Base de datos relacional (PaaS) | **5 bases de datos** (una por MS) | General Purpose — 2 vCores |
 | **Azure Cosmos DB** | Base de datos documental (PaaS) | 1 cuenta / **4 contenedores** | Serverless o Autoscale 1000 RU/s |
 | **Azure Cache for Redis** | Caché distribuida (PaaS) | 1 clúster compartido | C1 Standard (con replicación) |
