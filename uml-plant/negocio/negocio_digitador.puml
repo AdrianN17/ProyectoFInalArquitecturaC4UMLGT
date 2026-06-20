@@ -1,0 +1,92 @@
+@startuml HEPAQ_Negocio_Digitador
+
+skinparam backgroundColor #FFFFFF
+skinparam ActivityBackgroundColor #EAF7EA
+skinparam ActivityBorderColor #27AE60
+skinparam ActivityDiamondBackgroundColor #FEF9E7
+skinparam ActivityDiamondBorderColor #E67E22
+skinparam ArrowColor #444444
+skinparam swimlaneBorderColor #BBBBBB
+skinparam shadowing false
+
+title HEPAQ — Flujo de Trabajo del Digitador / Recepcionista\nPerspectiva de Negocio
+
+|Paciente|
+start
+:Solicitar una cita médica\n(presencialmente o por teléfono);
+
+|Digitador|
+:Recibir la solicitud de cita\ne ingresar el DNI del paciente;
+
+|Sistema HEPAQ|
+:Verificar la identidad del paciente\nen el registro de RENIEC;
+
+if (¿El DNI es válido y está registrado?) then (Sí)
+
+    |Sistema HEPAQ|
+    :Verificar que el paciente\ntiene seguro EsSalud vigente;
+
+    if (¿El seguro del paciente está activo?) then (Sí)
+
+        |Digitador|
+        :Consultar al paciente la especialidad\no médico de su preferencia;
+
+        |Sistema HEPAQ|
+        :Mostrar médicos disponibles\ny sus horarios libres;
+
+        |Digitador|
+        :Acordar con el paciente el médico,\nfecha y hora de la cita;
+        :Confirmar los datos de la cita\nantes de registrarla;
+
+        |Sistema HEPAQ|
+        :Registrar la cita en el sistema\ny enviar confirmación al paciente;
+
+        |Paciente|
+        :Recibir confirmación de la cita\npor Email y SMS con todos los detalles;
+
+    else (No — sin cobertura)
+
+        |Digitador|
+        :Informar al paciente que su seguro\nno está vigente o activo;
+        :Orientar al paciente para que regularice\nsu situación ante EsSalud;
+
+    endif
+
+else (No — DNI no encontrado)
+
+    |Digitador|
+    :Informar al paciente que el DNI\nno fue encontrado en el sistema;
+    :Solicitar documentación adicional\npara gestión manual;
+
+endif
+
+|Digitador|
+switch (¿El paciente solicita cambios en una cita existente?)
+
+case (Reagendar)
+    |Sistema HEPAQ|
+    :Mostrar las citas activas\ndel paciente;
+
+    |Digitador|
+    :Seleccionar la cita a reagendar\ny elegir una nueva fecha disponible;
+
+    |Sistema HEPAQ|
+    :Reagendar la cita y notificar\nal paciente y al médico;
+
+case (Cancelar)
+    |Sistema HEPAQ|
+    :Mostrar las citas activas\ndel paciente;
+
+    |Digitador|
+    :Seleccionar la cita a cancelar\ny registrar el motivo;
+
+    |Sistema HEPAQ|
+    :Cancelar la cita y notificar\nal paciente y al médico;
+
+case (Sin cambios)
+
+endswitch
+
+stop
+
+@enduml

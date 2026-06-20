@@ -1,0 +1,87 @@
+@startuml HEPAQ_Negocio_Paciente
+
+skinparam backgroundColor #FFFFFF
+skinparam ActivityBackgroundColor #FEF9E7
+skinparam ActivityBorderColor #E67E22
+skinparam ActivityDiamondBackgroundColor #EAF4FB
+skinparam ActivityDiamondBorderColor #2980B9
+skinparam ArrowColor #444444
+skinparam swimlaneBorderColor #BBBBBB
+skinparam shadowing false
+
+title HEPAQ — Experiencia del Paciente\nPerspectiva de Negocio
+
+|Paciente|
+start
+:Sentir la necesidad de atención médica\n(enfermedad, control periódico o seguimiento);
+
+if (¿Prefiere agendar desde la aplicación móvil?) then (Sí — App)
+
+    :Abrir la aplicación HEPAQ\ne iniciar sesión con sus credenciales;
+    :Seleccionar "Nueva Cita"\ny elegir la especialidad médica;
+
+    |Sistema HEPAQ|
+    :Verificar la identidad (DNI) del paciente\ny la vigencia de su seguro EsSalud automáticamente;
+    :Mostrar médicos disponibles\ny sus horarios libres;
+
+    |Paciente|
+    :Elegir el médico, la fecha y hora\nde su preferencia;
+
+    |Sistema HEPAQ|
+    :Confirmar la cita y enviar\nnotificación por Email y SMS;
+
+else (No — Presencialmente)
+
+    :Acudir a la recepción de EsSalud\ny presentar su DNI;
+
+    |Digitador|
+    :Verificar la identidad y el seguro\ndel paciente en el sistema;
+    :Buscar disponibilidad de médicos\ny registrar la cita acordada;
+
+    |Sistema HEPAQ|
+    :Confirmar la cita y enviar\nnotificación por Email y SMS;
+
+    |Paciente|
+
+endif
+
+:Recibir la confirmación con los detalles\nde su cita (médico, fecha, lugar y hora);
+:Prepararse para la cita según las\nindicaciones previas recibidas;
+:Presentarse a la cita en la fecha\ny hora indicadas;
+
+|Médico|
+:Registrar el motivo de consulta\ny realizar el examen físico;
+:Establecer el diagnóstico\ncon código CIE-10;
+:Indicar el tratamiento\ny plan de seguimiento;
+
+|Sistema HEPAQ|
+:Guardar la consulta en el historial médico\ny notificar al paciente el resumen de la atención;
+
+|Paciente|
+:Recibir el resumen de la consulta\ncon diagnóstico y tratamiento indicado;
+
+if (¿El médico solicitó exámenes médicos?) then (Sí)
+
+    :Acudir al área de exámenes\nen la fecha y hora indicadas;
+
+    |Médico|
+    :Procesar la muestra o imágenes\ny registrar los resultados en el sistema;
+
+    |Sistema HEPAQ|
+    :Notificar al paciente que sus\nresultados ya están disponibles;
+
+    |Paciente|
+    :Recibir la notificación de\nresultados por Email y SMS;
+
+    if (¿Los resultados requieren seguimiento médico?) then (Sí)
+        :Agendar una nueva cita\npara evaluar los resultados con el médico;
+    else (No)
+        :Revisar los resultados\nen la aplicación móvil de HEPAQ;
+    endif
+
+endif
+
+:Consultar su historial clínico completo\n(diagnósticos, exámenes y consultas anteriores)\ndesde la aplicación móvil en cualquier momento;
+stop
+
+@enduml

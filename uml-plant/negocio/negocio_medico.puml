@@ -1,0 +1,71 @@
+@startuml HEPAQ_Negocio_Medico
+
+skinparam backgroundColor #FFFFFF
+skinparam ActivityBackgroundColor #EAF4FB
+skinparam ActivityBorderColor #2980B9
+skinparam ActivityDiamondBackgroundColor #FEF9E7
+skinparam ActivityDiamondBorderColor #E67E22
+skinparam ArrowColor #444444
+skinparam swimlaneBorderColor #BBBBBB
+skinparam shadowing false
+
+title HEPAQ — Flujo de Trabajo del Médico\nPerspectiva de Negocio
+
+|Médico|
+start
+:Iniciar turno de atención;
+:Revisar agenda del día\n(pacientes citados y horarios programados);
+
+repeat
+
+    :Llamar al siguiente paciente\nde la lista de espera;
+
+    |Sistema HEPAQ|
+    :Presentar historial clínico del paciente:\nconsultas anteriores, diagnósticos y exámenes previos;
+
+    |Médico|
+    :Revisar antecedentes del paciente\nantes de iniciar la consulta;
+    :Escuchar el motivo de consulta\ny registrar los síntomas (anamnesis);
+    :Realizar el examen físico\ny registrar los signos vitales;
+
+    if (¿El paciente requiere diagnóstico?) then (Sí)
+        :Identificar la condición médica\ny seleccionar el código CIE-10 correspondiente;
+        :Redactar el plan de tratamiento\n(medicamentos, dosis e indicaciones);
+
+        |Sistema HEPAQ|
+        :Guardar el diagnóstico en el historial\nclínico del paciente;
+
+        |Médico|
+    endif
+
+    if (¿El paciente requiere exámenes?) then (Sí)
+        :Seleccionar el tipo de examen\n(laboratorio / imagen / ecografía);
+        :Indicar las instrucciones previas\nnecesarias para el paciente;
+
+        |Sistema HEPAQ|
+        :Registrar la solicitud de examen\ny notificar al área correspondiente;
+
+        |Médico|
+        :Aguardar la realización del examen\ny la carga de resultados;
+
+        |Sistema HEPAQ|
+        :Notificar al médico que el resultado\ndel examen está disponible;
+
+        |Médico|
+        :Revisar e interpretar el resultado\ndel examen;
+    endif
+
+    :Completar la consulta\ne indicar el plan de seguimiento al paciente;
+
+    |Sistema HEPAQ|
+    :Registrar la consulta como completada\ny actualizar el historial del paciente;
+    :Enviar resumen de la atención médica\nal paciente por Email y SMS;
+
+    |Médico|
+
+repeat while (¿Quedan más pacientes en la agenda?) is (Sí) not (No)
+
+:Finalizar el turno de atención;
+stop
+
+@enduml
